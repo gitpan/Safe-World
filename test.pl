@@ -3,7 +3,7 @@
 ###use Data::Dumper ; print Dumper( $world ) ;
 
 use Test;
-BEGIN { plan tests => 47 } ;
+BEGIN { plan tests => 53 } ;
 
 use Safe::World ;
 
@@ -99,6 +99,43 @@ use warnings qw'all' ;
   ok($stdout1 , "test1\n");
   ok($stderr1 , '') ;
   
+}
+#########################
+{
+
+  my ( $stdout0 , $stderr0 ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout0 ,
+  stderr => \$stderr0 ,
+  flush  => 1,
+  ) ;
+  
+  $world->eval(q`
+    print "test0\n" ;
+    warn("alert0");
+  `);
+  
+  my ( $stdout1 , $stderr1 ) ;
+  
+  $world->reset_output(
+  stdout => \$stdout1 ,
+  stderr => \$stderr1 ,
+  ) ;
+  
+  $world->eval(q`
+    print "test1\n" ;
+    warn("alert1");    
+  `);  
+  
+  $world->close ;
+  
+  ok($stdout0 , "test0\n");
+  ok($stderr0 =~ /^alert0[^\r\n]*$/) ;
+  
+  ok($stdout1 , "test1\n");
+  ok($stderr1 =~ /^alert1[^\r\n]*$/s) ;
+
 }
 #########################
 {
@@ -420,7 +457,7 @@ end!
   ok($stderr , "error!\nwarning!!! at (eval x) line 19.\n") ;
 }
 #########################
-{
+if (0){
 
   my ( $stdout , $stderr ) ;
 
@@ -604,6 +641,46 @@ end!
   $world->eval_args(q` print "b> @_|" ;` , 123 , 456);
   
   ok($stdout , 'a> |b> 123 456|') ;
+  ok($stderr , '') ;
+
+}
+#########################
+{
+
+package foo ;
+  use vars qw($var);
+  $var = 'foovar!' ;
+  sub test { print "TEST! $var >> @_|" ; }
+  
+package main ;
+
+  use Safe::World::Scope ;
+  
+  my $scope = new Safe::World::Scope('foo') ;
+    
+  my ( $stdout , $stderr ) ;
+  
+  my $world = new Safe::World(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+    
+  $world->set('$scope' , $scope , 1) ; ## Set the object inside the World.
+  
+  $world->eval(q`
+    $scope->call('test','argmunet') ;
+    
+    my $v = $scope->get('$var') ;
+    print "var: $v|" ;
+    
+    $scope->set('$var', '123' ) ;
+    
+    $v = $scope->get('$var') ;
+    print "var after set: $v|" ;
+  `);
+  
+  ok($stdout , 'TEST! foovar! >> argmunet|var: foovar!|var after set: 123|') ;
   ok($stderr , '') ;
 
 }

@@ -15,7 +15,7 @@ package Safe::World ;
 use Safe::World::Compartment ;
 use Safe::World::ScanPack ;
 
-use Safe::World::select ;
+require Safe::World::select ; ## To be loaded after declare Safe::World scope.
 use Safe::World::stdout ;
 use Safe::World::stdoutsimple ;
 use Safe::World::stderr ;
@@ -23,7 +23,20 @@ use Safe::World::stderr ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.04' ;
+$VERSION = '0.05' ;
+
+##########
+# SCOPES #
+##########
+
+  use Safe::World::Scope ;
+
+  my $SCOPE_Safe_World_stdout = new Safe::World::Scope('Safe::World::stdout') ;
+  my $SCOPE_Safe_World_Compartment = new Safe::World::Scope('Safe::World::Compartment') ;
+  my $SCOPE_Safe_World_select = new Safe::World::Scope('Safe::World::select') ;
+  my $SCOPE_Safe_World_ScanPack = new Safe::World::Scope('Safe::World::ScanPack') ;
+  
+  my $Safe_World_stdout_headsplitter_html = \&Safe::World::stdout::headsplitter_html ;
 
 ########
 # VARS #
@@ -31,7 +44,7 @@ $VERSION = '0.04' ;
 
   use vars qw($NOW $EVALX) ;
 
-  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC) ;
+  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC , %WORLDS_LINKS) ;
   
   my $COMPARTMENT_NAME = 'SAFEWORLD' ;
   
@@ -96,7 +109,7 @@ sub EXIT {
   if ( $NOW && ref($NOW) eq 'Safe::World' ) {
     my $exit ;
     if ( $NOW->{ONEXIT} ) {
-      my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
+      my $sel = select( $NOW->{SELECT}{PREVSTDOUT} ) if $NOW->{SELECT}{PREVSTDOUT} ;
         my $sub = $NOW->{ONEXIT} ;
         $exit = &$sub($NOW , @_) ;
       select($sel) if $sel ;
@@ -166,8 +179,10 @@ sub new {
   $this->{AUTOHEAD} = $args{autohead} ;
   $this->{AUTOHEAD} = 1 if ($this->{HEADOUT} && !exists $args{autohead}) ;
   
-  $this->{HEADSPLITTER} = $args{headsplitter} || qr/(?:\r\n\r\n|\012\015\012\015|\n\n|\015\015|\r\r|\012\012)/s if $this->{AUTOHEAD} ;
-  if ( $this->{HEADSPLITTER} eq 'HTML' ) { $this->{HEADSPLITTER} = \&Safe::World::stdout::headsplitter_html ;}
+  $this->{HEADSPLITTER} = $args{headsplitter} || $args{headspliter} || qr/(?:\r\n\r\n|\012\015\012\015|\n\n|\015\015|\r\r|\012\012)/s if $this->{AUTOHEAD} ;
+  if ( $this->{HEADSPLITTER} eq 'HTML' ) {
+    $this->{HEADSPLITTER} = $Safe_World_stdout_headsplitter_html ; ##\&Safe::World::stdout::headsplitter_html ;
+  }
   
   ####
   
@@ -191,7 +206,7 @@ sub new {
   
   $this->{NO_CLEAN} = 1 if $args{no_clean} ;
   
-  $this->{SAFE} = Safe::World::Compartment->new($packname) ;
+  $this->{SAFE} = $SCOPE_Safe_World_Compartment->NEW($packname) ; # Safe::World::Compartment->new($packname) ;
   $this->{SAFE}->deny_only(@DENY_OPS) ;
 
   *{"$packname\::$packname\::"} = *{"$packname\::"} ;
@@ -266,7 +281,7 @@ sub sync_evalx {
   eval("=1") ;
   $@ = $tmp ;
   my ($evalx) = ( $@ =~ /\(eval (\d+)/s );
-  $Safe::World::EVALX = $evalx ;
+  $EVALX = $evalx ;
 }
 
 #########
@@ -338,13 +353,65 @@ sub reset {
   return 1 ;
 }
 
+################
+# RESET_OUTPUT #
+################
+
+sub reset_output {
+  my $this = shift ;
+  my ( %args ) = @_ ;
+  
+  my $packname = $this->{ROOT} ;
+  
+  if ( $args{stdout} ) {
+    $this->{STDOUT} = $args{stdout} ;
+
+    if ( $this->{STDOUT} && !ref($this->{STDOUT}) ) { $this->{STDOUT} = \*{$this->{STDOUT}} ;}
+    if ( ref($this->{STDOUT}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
+    ${$this->{STDOUT}} .= '' if ref($this->{STDOUT}) eq 'SCALAR' ;
+    
+    $this->{TIESTDOUT}->{STDOUT} = $this->{STDOUT} if $this->{STDOUT} ;
+  }
+  
+  if ( $args{stderr} ) {
+    $this->{STDERR} = $args{stderr} ;
+
+    if ( $this->{STDERR} && !ref($this->{STDERR}) ) { $this->{STDERR} = \*{$this->{STDERR}} ;}
+    if ( ref($this->{STDERR}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}
+    ${$this->{STDERR}} .= '' if ref($this->{STDERR}) eq 'SCALAR' ;
+    
+    $this->{TIESTDERR}->{STDERR} = $this->{STDERR} if $this->{STDERR} ;
+  }
+  
+  if ( $args{headout} ) {
+    $this->{HEADOUT} = $args{headout} ;
+
+    if ( $this->{HEADOUT} && !ref($this->{HEADOUT}) ) { $this->{HEADOUT} = \*{$this->{HEADOUT}} ;}
+    if ( ref($this->{HEADOUT}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{HEADOUT} = undef ;}
+    ${$this->{HEADOUT}} .= '' if ref($this->{HEADOUT}) eq 'SCALAR' ;
+    
+    $this->{TIESTDOUT}->{HEADOUT} = $this->{HEADOUT} if $this->{HEADOUT} ;
+  }
+  
+  if ( $args{stdin} ) {
+    $this->{STDIN} = $args{stdin} ;
+
+    if ( $this->{STDIN} && !ref($this->{STDIN}) ) { $this->{STDIN} = \*{$this->{STDIN}} ;}
+    if ( ref($this->{STDIN}) !~ /^(?:GLOB)$/ ) { $this->{STDIN} = undef ;}
+
+    *{"$packname\::STDIN"}  = $this->{STDIN} if $this->{STDIN} ;
+  }
+  
+  return 1 ;
+}
+
 #################
 # SELECT_STATIC #
 #################
 
 sub select_static {
   if ( !$SAFE_WORLD_SELECTED_STATIC && $NOW != $_[0] ) {
-    $SAFE_WORLD_SELECTED_STATIC = Safe::World::select->new($_[0]) ;
+    $SAFE_WORLD_SELECTED_STATIC = $SCOPE_Safe_World_select->NEW($_[0]) ; ## Safe::World::select->new($_[0]) ;
     return 1 ;
   }
   return ;
@@ -379,7 +446,7 @@ sub eval {
   ##print "[[$_[1]]]\n" ;
   if ( $_[0]->{INSIDE} ) {
     ##print "EVAL>> INSIDE $_[1]\n" ;
-    ++$Safe::World::EVALX ;
+    ++$EVALX ;
     
     if ( wantarray ) {
       my @__HPL_ReT__ = eval("no strict;\@_ = () ; package main ; $_[1]") ;
@@ -395,7 +462,9 @@ sub eval {
   else {
     #print "EVAL>> OUT $_[1]\n" ;
     my $SAFE_WORLD_selected ;
-    if ( $NOW != $_[0] ) { $SAFE_WORLD_selected = Safe::World::select->new($_[0]) ;}
+    if ( $NOW != $_[0] ) {
+      $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($_[0]) ; ##Safe::World::select->new($_[0]) ;
+    }
     
     $_[0]->{INSIDE} = 1 ;
     
@@ -432,12 +501,12 @@ sub eval_args {
   $_ = \@_ ;
   
   if ( wantarray ) {
-    my @ret = $this->eval("\@_=\@{\$_}; $code") ;
+    my @ret = $this->eval("\@_=\@{\$_};\$_=undef; $code") ;
     $_ = $tmp ;
     return @ret ;
   }
   else {
-    my $ret = $this->eval("\@_=\@{\$_}; $code") ;
+    my $ret = $this->eval("\@_=\@{\$_};\$_=undef; $code") ;
     $_ = $tmp ;
     return $ret ;
   }
@@ -512,7 +581,7 @@ sub get_ref {
   elsif ($var_tp eq '@') { return \@{$pack.'::'.$var} ;}
   elsif ($var_tp eq '%') { return \%{$pack.'::'.$var} ;}
   elsif ($var_tp eq '*') { return \*{$pack.'::'.$var} ;}
-  else                   { ++$Safe::World::EVALX ; return eval("package $pack ; \\$varfull") ;}
+  else                   { ++$EVALX ; return eval("package $pack ; \\$varfull") ;}
 }
 
 ################
@@ -536,7 +605,7 @@ sub get_ref_copy {
   elsif ($var_tp eq '@') { return [@{$pack.'::'.$var}] ;}
   elsif ($var_tp eq '%') { return {%{$pack.'::'.$var}} ;}
   elsif ($var_tp eq '*') { return \*{$pack.'::'.$var} ;}
-  else                   { ++$Safe::World::EVALX ; return eval("package $pack ; \\$varfull") ;}
+  else                   { ++$EVALX ; return eval("package $pack ; \\$varfull") ;}
 }
 
 #######
@@ -592,7 +661,9 @@ sub set_vars {
   my ( %vars ) = @_ ;
   
   my $SAFE_WORLD_selected ;
-  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
+  }
   
   my $pack = $this->{ROOT} ;
   
@@ -621,7 +692,7 @@ sub set_vars {
       if    (ref($vars{$Key}) eq 'GLOB')  { *{$pack.'::'.$var} = $vars{$Key} ;}
       else                                { *{$pack.'::'.$var} = \*{$vars{$Key}} ;}
     }
-    else { ++$Safe::World::EVALX ; eval("$Key = \$vars{\$Key} ;") ;}
+    else { ++$EVALX ; eval("$Key = \$vars{\$Key} ;") ;}
   }
   
   return 1 ;
@@ -810,6 +881,8 @@ sub link_world {
   
   $world->{WORLD_SHARED} = $root ;
   
+  $WORLDS_LINKS{$this}{$world} = $world ;
+  
   return 1 ;
 }
 
@@ -842,6 +915,25 @@ sub unlink_world {
   
   $world->{WORLD_SHARED} = undef ;
   
+  delete $WORLDS_LINKS{$this}{$world} ;
+  
+  return 1 ;
+}
+
+#####################
+# UNLINK_ALL_WORLDS #
+#####################
+
+sub unlink_all_worlds {
+  my $this = shift ;
+  if ( $this->{INSIDE} || !$WORLDS_LINKS{$this} ) { return ;}
+  
+  foreach my $Key ( keys %{ $WORLDS_LINKS{$this} } ) {
+    $this->unlink_world( $WORLDS_LINKS{$this}{$Key} ) ;
+  }
+  
+  delete $WORLDS_LINKS{$this} ;
+  
   return 1 ;
 }
 
@@ -850,8 +942,8 @@ sub unlink_world {
 #############
 
 sub scanpacks {
-  if ( ref($_[0]) && $_[0]->{INSIDE} ) { return ;}
-  my $scan = Safe::World::ScanPack->new( ref($_[0]) ? $_[0]->{ROOT} : $_[0] ) ;
+  if ( ref($_[0]) && ( $_[0]->{INSIDE} || $NOW == $_[0] ) ) { return ;}
+  my $scan = $SCOPE_Safe_World_ScanPack->NEW( ref($_[0]) ? $_[0]->{ROOT} : $_[0] ) ; ## Safe::World::ScanPack->new( ref($_[0]) ? $_[0]->{ROOT} : $_[0] ) ;
   return reverse $scan->packages ;
 }
 
@@ -861,8 +953,8 @@ sub scanpacks {
 
 sub scanpack_table {
   my $this = shift if ref($_[0]) ;
-  if ( ref($this) && $this->{INSIDE} ) { return ;}
-
+  if ( ref($this) && ( $this->{INSIDE} || $NOW == $this ) ) { return ;}
+  
   my ( $packname ) = @_ ;
   
   $packname = $this->{ROOT} . "::$packname" if $this ;
@@ -936,7 +1028,9 @@ sub print {
   my $this = shift ;
   
   my $SAFE_WORLD_selected ;
-  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
+  }
   
   $this->{TIESTDOUT}->print(@_) ;
 }
@@ -955,7 +1049,9 @@ sub print_stderr {
   my $this = shift ;
   
   my $SAFE_WORLD_selected ;
-  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
+  }
   
   $this->{TIESTDERR}->print(@_) ;
 }
@@ -968,7 +1064,9 @@ sub print_header {
   my $this = shift ;
   
   my $SAFE_WORLD_selected ;
-  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
+  }
   
   $this->{TIESTDOUT}->print_headout(@_) ;
 }
@@ -1006,7 +1104,7 @@ sub flush {
     else { $this->set('$|',0) ;}
   }
 
-  $this->{TIESTDOUT}->flush ;
+  $this->{TIESTDOUT}->flush if $this->{TIESTDOUT} ;
 }
 
 ###################
@@ -1017,7 +1115,9 @@ sub close_tiestdout {
   my $this = shift ;
   
   my $SAFE_WORLD_selected ;
-  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
+  }
 
   $this->{TIESTDOUT}->CLOSE ;
 }
@@ -1030,7 +1130,9 @@ sub close_tiestderr {
   my $this = shift ;
   
   my $SAFE_WORLD_selected ;
-  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
+  }
 
   $this->{TIESTDERR}->CLOSE ;
 }
@@ -1062,10 +1164,10 @@ sub close {
 sub DESTROY {
   my $this = shift ;
   return if $this->{DESTROIED} ;
-
-  $this->close ;
-
   $this->{DESTROIED} = 1 ;
+
+  $this->unlink_all_worlds ;
+  $this->close ;
   
   $this->{LINKED_PACKS}{$this->{ROOT}} = 1 ;
   $this->{LINKED_PACKS}{main} = 1 ;
@@ -1081,7 +1183,8 @@ sub DESTROY {
 
 sub CLEAN {
   my $this = shift ;
-  return if ($this->{CLEANNED} , $this->{NO_CLEAN}) ;
+  return if ($this->{CLEANNED} || $this->{NO_CLEAN} || $NOW == $this ) ;
+  
   $this->{CLEANNED} = 1 ;
   
   $this->DESTROY ;
@@ -1159,11 +1262,11 @@ sub undef_pack {
   my ($fullname) ;
   foreach my $symb ( keys %$package ) {
     $fullname = "$packname$symb" ;
-    if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ ) {
+    if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ && $symb !~ /^\d/ ) {
       #print main::STDOUT "$packname>> $symb >> $fullname\n" ;
 
       if (defined &$fullname) {
-        if (my $p = prototype $fullname) { ++$Safe::World::EVALX ; *{$fullname} = eval "sub ($p) {}" ;}
+        if (my $p = prototype $fullname) { ++$EVALX ; *{$fullname} = eval "sub ($p) {}" ;}
         else                             { *{$fullname} = $tmp_sub ;}
         undef &$fullname ;
       }
@@ -1549,6 +1652,10 @@ Link the compartment of a world to another.
 
 Unlink/disassemble a World from another.
 
+=head2 unlink_all_worlds
+
+Unlink all the worlds linked to this.
+
 =head2 print (STRING)
 
 Print some data to the STDOUT of the world.
@@ -1600,7 +1707,7 @@ Restore the STDOUT output if a I<redirect_stdout()> was made before.
 
 Reset the object flags. Soo, if it was closed (exited) can be reused.
 
-You can redefine this flags (sending this arguments):
+You also can redefine this attributes sending this arguments:
 
 =over 10
 
@@ -1631,6 +1738,16 @@ The HEADOUT target. Can be another GLOB/FILEHANDLER, a SCALAR reference, or a I<
 The HASH reference for the internal I<%ENV> of the World.
 
 =back
+
+=head2 reset_output
+
+Reset the outputs (STDOUT, STDERR, STDIN, HEADOUT).
+
+Arguments: stdout, stderr, stdin, headout.
+
+I<** Note that only pasted arguments will be used to redefine. Soo, wont be used default values like reset().>
+
+I<** See reset().>
 
 =head2 root
 

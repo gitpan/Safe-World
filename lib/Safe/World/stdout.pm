@@ -15,7 +15,15 @@ package Safe::World::stdout ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.01' ;
+$VERSION = '0.02' ;
+
+##########
+# SCOPES #
+##########
+
+  use vars qw($Safe_World_NOW) ;
+  
+  *Safe_World_NOW = \$Safe::World::NOW ;
 
 ######################
 # CHECK_HEADSPLITTER #
@@ -28,9 +36,9 @@ sub check_headsplitter {
   my $headsplitter = $this->{HEADSPLITTER} ;
 
   my ($headers , $end) ;
-  
+ 
   if ( ref($headsplitter) eq 'CODE' ) {
-    ($headers , $end) = &$headsplitter( $Safe::World::NOW , $this->{AUTOHEAD_DATA} ) ;
+    ($headers , $end) = &$headsplitter( $Safe_World_NOW , $this->{AUTOHEAD_DATA} ) ;
   }
   elsif ( $this->{AUTOHEAD_DATA} =~ /^(.*?$headsplitter)(.*)/s ) {
     $headers = $1 ;
@@ -49,7 +57,7 @@ sub check_headsplitter {
 sub headsplitter_html {
   shift ;
   my $headsplitter ;
-  
+    
   if ( $_[0] =~ /Content-Type:\s*\S+(.*?)(\015?\012\015?\012|\r?\n\r?\n)/si ) {
     if ($1 !~ /<.*?>/s) { $headsplitter = $2 ;}
   }
@@ -132,9 +140,9 @@ sub print_stdout {
   else {
     if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
       $this->{HEADER_CLOSED} = 1 ;
-      my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
+      my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
       my $oncloseheaders = $this->{ONCLOSEHEADERS} ;
-      &$oncloseheaders( $Safe::World::NOW , $this->headers ) ;
+      &$oncloseheaders( $Safe_World_NOW , $this->headers ) ;
       select($sel) if $sel ;
     }
     
@@ -142,8 +150,8 @@ sub print_stdout {
   
     if ( ref($stdout) eq 'SCALAR' ) { $$stdout .= $_[0] ;}
     elsif ( ref($stdout) eq 'CODE' ) {
-      my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
-      &$stdout($Safe::World::NOW , $_[0]) ;
+      my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+      &$stdout($Safe_World_NOW , $_[0]) ;
       select($sel) if $sel ;
     }
     else { print $stdout $_[0] ;}
@@ -165,8 +173,8 @@ sub print_headout {
 
   if ( ref($headout) eq 'SCALAR' ) { $$headout .= $_[0] ;}
   elsif ( ref($headout) eq 'CODE' ) {
-    my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
-    &$headout($Safe::World::NOW , $_[0]) ;
+    my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+    &$headout($Safe_World_NOW , $_[0]) ;
     select($sel) if $sel ;
   }
   else { print $headout $_[0] ;}
@@ -197,9 +205,9 @@ sub close_headers {
   
   if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
     $this->{HEADER_CLOSED} = 1 ;
-    my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
+    my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
     my $oncloseheaders = $this->{ONCLOSEHEADERS} ;
-    &$oncloseheaders( $Safe::World::NOW , $this->headers ) ;
+    &$oncloseheaders( $Safe_World_NOW , $this->headers ) ;
     select($sel) if $sel ;
   }
 

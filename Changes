@@ -1,6 +1,14 @@
 Revision history for Perl extension Safe::World.
 
-0.04  30 Nov 2003
+0.05  16 Dec 2003
+      - Added methods reset_output(), unlink_all_worlds().
+      - Fixed bug on destroy.
+      - New module Safe::World::Scope, for objects that works inside the World without share packages.
+      - Added dependece to Safe::Hole/0.08, due Safe::World::Scope.
+      - All the Safe::World* packages reviseds to use Safe::World::Scope access.
+
+
+0.04  09 Dec 2003
       - New test with IO::Socket to test select() inside the compartment.
         (Due old problems in other works with Safe and mod_perl, just to ensure that it's ok in Safe::World).
       - Fixed warnings for constant redefinition on Perl-5.8.x when cleanning the compartment.

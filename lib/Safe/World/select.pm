@@ -15,7 +15,20 @@ package Safe::World::select ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.01' ;
+$VERSION = '0.02' ;
+
+##########
+# SCOPES #
+##########
+
+  use Safe::World::Scope ;
+  
+  my $SCOPE_Safe_World = new Safe::World::Scope('Safe::World') ;
+
+  use vars qw($Safe_World_NOW $Safe_World_EVALX) ;
+  
+  *Safe_World_NOW = \$Safe::World::NOW ;
+  *Safe_World_EVALX = \$Safe::World::EVALX ;
 
 #######
 # NEW #
@@ -24,14 +37,14 @@ $VERSION = '0.01' ;
 sub new {
   return undef if $_[1]->{DESTROIED} ;
 
-  #my @call = caller ; print "SELECT NEW>> $_[1] [$Safe::World::NOW] @call\n" ;
+  #my @call = caller ; print "SELECT NEW>> $_[1] [$Safe_World_NOW] @call\n" ;
   
   my $eval_err = $@ ;
 
   my $this = bless({} , __PACKAGE__) ;
   
-  $this->{PREVWORLD} = $Safe::World::NOW ;
-  $Safe::World::NOW = $this->{WORLD} = $_[1] ;
+  $this->{PREVWORLD} = $Safe_World_NOW ;
+  $Safe_World_NOW = $this->{WORLD} = $_[1] ;
   
   $this->{WORLD}->{SELECT}  = {} if !$this->{WORLD}->{SELECT} ;
   $this->{WORLD}->{SHARING} = {} if !$this->{WORLD}->{SHARING} ;
@@ -64,7 +77,7 @@ sub new {
     &$sub($this->{WORLD}) ;
   }
   
-  Safe::World::sync_evalx() ;
+  $SCOPE_Safe_World->call('sync_evalx') ; ## Safe::World::sync_evalx() ;
   
   $@ = $eval_err ;
 
@@ -105,9 +118,9 @@ sub DESTROY {
   
   select($this->{PREVSTDOUT}) ;
 
-  $Safe::World::NOW = (ref($this->{PREVWORLD}) eq 'Safe::World') ? $this->{PREVWORLD} : undef ;
+  $Safe_World_NOW = (ref($this->{PREVWORLD}) eq 'Safe::World') ? $this->{PREVWORLD} : undef ;
   
-  Safe::World::sync_evalx() ;
+  $SCOPE_Safe_World->call('sync_evalx') ; ## Safe::World::sync_evalx() ;
   
   $@ = $eval_err ;
   
@@ -129,7 +142,7 @@ sub out_get_ref_copy {
   elsif ($var_tp eq '@') { return [@{'main::'.$var}] ;}
   elsif ($var_tp eq '%') { return {%{'main::'.$var}} ;}
   elsif ($var_tp eq '*') { return \*{'main::'.$var} ;}
-  else                   { ++$Safe::World::EVALX ; return eval("package main ; \\$varfull") ;}
+  else                   { ++$Safe_World_EVALX ; return eval("package main ; \\$varfull") ;}
 }
 
 ###########
@@ -147,7 +160,7 @@ sub out_set {
   elsif ($var_tp eq '@') { @{'main::'.$name} = @{$val} ;}
   elsif ($var_tp eq '%') { %{'main::'.$name} = %{$val} ;}
   elsif ($var_tp eq '*') { *{'main::'.$name} = $val ;}
-  else  { ++$Safe::World::EVALX ; eval("$var = \$val ;") ;}
+  else  { ++$Safe_World_EVALX ; eval("$var = \$val ;") ;}
 }
 
 ################
@@ -156,7 +169,7 @@ sub out_set {
 
 sub print_stderr {
 #  print main::STDOUT "warn>> @_ <<[$@]\n" ;
-  $Safe::World::NOW->print_stderr(@_) ;  return ;
+  $Safe_World_NOW->print_stderr(@_) ;  return ;
 }
 
 ##############
@@ -167,9 +180,9 @@ sub handle_die {
   my $core_exit = 1 if $_[0] =~ /#CORE::GLOBAL::exit#/ ;
   my $exit = 1 if $core_exit ;
 
-  $Safe::World::NOW->{EXIT} = 1 if $exit ;
-  $Safe::World::NOW->print_stderr(@_) if !$core_exit ;
-  $Safe::World::NOW->close if $exit ;
+  $Safe_World_NOW->{EXIT} = 1 if $exit ;
+  $Safe_World_NOW->print_stderr(@_) if !$core_exit ;
+  $Safe_World_NOW->close if $exit ;
   
   $@ = undef if $core_exit ;
   

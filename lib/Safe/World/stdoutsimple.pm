@@ -15,7 +15,15 @@ package Safe::World::stdoutsimple ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.01' ;
+$VERSION = '0.02' ;
+
+##########
+# SCOPES #
+##########
+
+  use vars qw($Safe_World_NOW) ;
+  
+  *Safe_World_NOW = \$Safe::World::NOW ;
 
 ###########
 # HEADERS #
@@ -39,8 +47,8 @@ sub print_stdout {
   
   if ( ref($stdout) eq 'SCALAR' ) { $$stdout .= $_[0] ;}
   elsif ( ref($stdout) eq 'CODE' ) {
-    my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
-    &$stdout($Safe::World::NOW , $_[0]) ;
+    my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+    &$stdout($Safe_World_NOW , $_[0]) ;
     select($sel) if $sel ;
   }
   else { print $stdout $_[0] ;}

@@ -12,7 +12,15 @@
 
 package Safe::World::Compartment ;
 
-use strict qw(vars);
+use strict qw(vars) ;
+
+##########
+# SCOPES #
+##########
+
+  use vars qw($Safe_World_EVALX) ;
+
+  *Safe_World_EVALX = \$Safe::World::EVALX ;
 
 ######### *** Don't declare any lexicals above this point ***
 
@@ -20,12 +28,12 @@ sub reval {
   my $__EVALCODE__ = $_[1] ;
   no strict ;
 
-  $Safe::World::EVALX += 2 ;
+  $Safe_World_EVALX += 2 ;
 
   return Opcode::_safe_call_sv(
     $_[0]->{Root},
     $_[0]->{Mask},
-    eval("package ". $_[0]->{Root} ."; sub {\@_=(); my \$EVALX = $Safe::World::EVALX; eval \$__EVALCODE__; }")
+    eval("package ". $_[0]->{Root} ."; sub {\@_=(); my \$EVALX = $Safe_World_EVALX; eval \$__EVALCODE__; }")
   );
 }
 
@@ -33,7 +41,7 @@ sub reval {
 
 use vars qw($VERSION @ISA) ;
 
-$VERSION = '0.01' ;
+$VERSION = '0.02' ;
 
 use Opcode 1.01, qw(
   opset opset_to_ops opmask_add
@@ -42,6 +50,7 @@ use Opcode 1.01, qw(
 );
 
 *ops_to_opset = \&opset ;   # Temporary alias for old Penguins
+*Opcode_safe_pkg_prep = \&Opcode::_safe_pkg_prep ;
 
 my $default_share = ['*_'] ;
 
@@ -58,7 +67,7 @@ sub new {
   $obj->permit_only(':default') ;
   $obj->share_from('main', $default_share) ;
   
-  Opcode::_safe_pkg_prep($root) if($Opcode::VERSION > 1.04);
+  Opcode_safe_pkg_prep($root) if($Opcode::VERSION > 1.04);
   
   return $obj;
 }
