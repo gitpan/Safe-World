@@ -61,6 +61,8 @@ sub new {
     my $sub = $this->{WORLD}->{ONSELECT} ;
     &$sub($this->{WORLD}) ;
   }
+  
+  Safe::World::sync_evalx() ;
 
   return $this ;
 }
@@ -99,6 +101,8 @@ sub DESTROY {
 
   $Safe::World::NOW = (ref($this->{PREVWORLD}) eq 'Safe::World') ? $this->{PREVWORLD} : undef ;
   
+  Safe::World::sync_evalx() ;
+  
   return ;
 }
 
@@ -117,7 +121,7 @@ sub out_get_ref_copy {
   elsif ($var_tp eq '@') { return [@{'main::'.$var}] ;}
   elsif ($var_tp eq '%') { return {%{'main::'.$var}} ;}
   elsif ($var_tp eq '*') { return \*{'main::'.$var} ;}
-  else                   { return eval("package main ; \\$varfull") ;}
+  else                   { ++$Safe::World::EVALX ; return eval("package main ; \\$varfull") ;}
 }
 
 ###########
@@ -135,7 +139,7 @@ sub out_set {
   elsif ($var_tp eq '@') { @{'main::'.$name} = @{$val} ;}
   elsif ($var_tp eq '%') { %{'main::'.$name} = %{$val} ;}
   elsif ($var_tp eq '*') { *{'main::'.$name} = $val ;}
-  else  { eval("$var = \$val ;") ;}
+  else  { ++$Safe::World::EVALX ; eval("$var = \$val ;") ;}
 }
 
 ################

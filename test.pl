@@ -3,7 +3,7 @@
 ###use Data::Dumper ; print Dumper( $world ) ;
 
 use Test;
-BEGIN { plan tests => 29 } ;
+BEGIN { plan tests => 33 } ;
 
 use Safe::World ;
 
@@ -63,6 +63,42 @@ use warnings ;
   ok($stdout , "\@INC: x\n\%INC: strict.pm\n");
   ok($stderr , '') ;
 
+}
+#########################
+{
+
+  my ( $stdout0 , $stderr0 ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout0 ,
+  stderr => \$stderr0 ,
+  ) ;
+  
+  $world->eval(q`
+    print "test0\n" ;
+  `);
+
+  $world->close ;
+  
+  my ( $stdout1 , $stderr1 ) ;
+  
+  $world->reset(
+  stdout => \$stdout1 ,
+  stderr => \$stderr1 ,
+  ) ;
+  
+  $world->eval(q`
+    print "test1\n" ;
+  `);  
+  
+  $world->close ;
+  
+  ok($stdout0 , "test0\n");
+  ok($stderr0 , '') ;
+  
+  ok($stdout1 , "test1\n");
+  ok($stderr1 , '') ;
+  
 }
 #########################
 {
@@ -288,7 +324,7 @@ use warnings ;
     print "Test1 " ;
   `);
   
-  ok($stdout , "SELECT UNSELECT SELECT UNSELECT SELECT UNSELECT SELECT Test1 UNSELECT ") ;
+  ok($stdout , "SELECT UNSELECT SELECT Test1 UNSELECT ") ;
   ok($stderr , '') ;
 
 }
@@ -382,7 +418,7 @@ end!
   $stderr =~ s/eval \d+/eval x/gi ;
 
   ok($stderr , "error!\nwarning!!! at (eval x) line 19.\n") ;
-
+  exit;
 }
 #########################
 

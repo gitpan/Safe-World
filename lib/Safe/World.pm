@@ -12,7 +12,7 @@
 
 package Safe::World ;
 
-use Safe ;
+use Safe::World::Compartment ;
 use Safe::World::ScanPack ;
 
 use Safe::World::select ;
@@ -23,13 +23,13 @@ use Safe::World::stderr ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.02' ;
+$VERSION = '0.03' ;
 
 ########
 # VARS #
 ########
 
-  use vars qw($NOW) ;
+  use vars qw($NOW $EVALX) ;
 
   my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC) ;
   
@@ -47,6 +47,7 @@ $VERSION = '0.02' ;
   ## TIESTDOUT       ## The tiestdout object
   ## TIESTDERR       ## The tiestderr object
   
+  ##                 ## Auto flush (BOOL)
   ## AUTOHEAD        ## If STDOUT start printing the headers, until HEADSPLITTER (like CGI). Def: 1 if HEADOUT
   ## HEADSPLITTER    ## The splitter (REGEXP|CODE) between headers and output. Def: \r\n\r\n (like CGI)
   ## ONCLOSEHEADERS  ## Function to call on close headers block.
@@ -159,6 +160,8 @@ sub new {
   ${$this->{HEADOUT}} .= '' if ref($this->{HEADOUT}) eq 'SCALAR' ;
   
   ####
+
+  $this->{FLUSH} = $args{flush} ;
   
   $this->{AUTOHEAD} = $args{autohead} ;
   $this->{AUTOHEAD} = 1 if ($this->{HEADOUT} && !exists $args{autohead}) ;
@@ -188,7 +191,7 @@ sub new {
   
   $this->{NO_CLEAN} = 1 if $args{no_clean} ;
   
-  $this->{SAFE} = Safe->new($packname) ;
+  $this->{SAFE} = Safe::World::Compartment->new($packname) ;
   $this->{SAFE}->deny_only(@DENY_OPS) ;
 
   *{"$packname\::$packname\::"} = *{"$packname\::"} ;
@@ -200,11 +203,11 @@ sub new {
   
   ###
   
-  if ( $args{flush} && !$this->{HEADOUT} && !$this->{AUTOHEAD} ) {
+  if ( $this->{FLUSH} && !$this->{HEADOUT} && !$this->{AUTOHEAD} ) {
     $this->{TIESTDOUT} = tie(*{"$packname\::STDOUT"} => 'Safe::World::stdoutsimple' , $this->{ROOT} , $this->{STDOUT} ) ;
   }
   else {
-    $this->{TIESTDOUT} = tie(*{"$packname\::STDOUT"} => 'Safe::World::stdout' , $this->{ROOT} , $this->{STDOUT} , $args{flush} , $this->{HEADOUT} , $this->{AUTOHEAD} , $this->{HEADSPLITTER} , $this->{ONCLOSEHEADERS} ) ;
+    $this->{TIESTDOUT} = tie(*{"$packname\::STDOUT"} => 'Safe::World::stdout' , $this->{ROOT} , $this->{STDOUT} , $this->{FLUSH} , $this->{HEADOUT} , $this->{AUTOHEAD} , $this->{HEADSPLITTER} , $this->{ONCLOSEHEADERS} ) ;
   }
 
   $this->{TIESTDERR} = tie(*{"$packname\::STDERR"} => 'Safe::World::stderr' , $this->{ROOT} , $this->{STDERR} ) ;
@@ -217,6 +220,13 @@ sub new {
   $this->link_pack('attributes') ;
   $this->link_pack('DynaLoader') ;
   $this->link_pack('IO') ;
+  
+  $this->link_pack('Exporter') ;
+  $this->link_pack('warnings') ;
+  $this->link_pack('CORE') ;  
+  
+  $this->link_pack('<none>') ;  
+  
   $this->link_pack('Apache') if defined *{"Apache::"} ;
   $this->link_pack('Win32') if defined *{"Win32::"} ;
 
@@ -225,6 +235,8 @@ sub new {
   '$@','$|','$_', '$!',
   #'$-', , '$/' ,'$!','$.' ,
   ]) ;
+
+  $this->select_static ;
 
   $this->set_vars(
   '%SIG' => \%SIG ,
@@ -239,8 +251,89 @@ sub new {
   $this->set('%INC',{}) ;
   
   $this->eval("no strict ;") ; ## just to load strict inside the compartment.
+  
+  $this->unselect_static ;
 
   return $this ;
+}
+
+##############
+# SYNC_EVALX #
+##############
+
+sub sync_evalx {
+  eval("=1") ;
+  my ($evalx) = ( $@ =~ /\(eval (\d+)/s );
+  $Safe::World::EVALX = $evalx ;
+}
+
+#########
+# RESET #
+#########
+
+sub reset {
+  my $this = shift ;
+  my ( %args ) = @_ ;
+  
+  my $packname = $this->{ROOT} ;
+  
+  $this->{EXIT}      = undef ;
+  $this->{DESTROIED} = undef ;
+  $this->{CLEANNED}  = undef ;
+  
+  $this->{STDOUT}  = $args{stdout} if $args{stdout} ;
+  $this->{STDIN}   = $args{stdin} if $args{stdin} ;
+  $this->{STDERR}  = $args{stderr} if $args{stderr} ;
+  $this->{HEADOUT} = $args{headout} if $args{headout} ;
+  
+  if ( $this->{STDOUT}  && !ref($this->{STDOUT}) )   { $this->{STDOUT}  = \*{$this->{STDOUT}} ;}
+  if ( $this->{STDIN}   && !ref($this->{STDIN}) )    { $this->{STDIN}   = \*{$this->{STDIN}} ;}
+  if ( $this->{STDERR}  && !ref($this->{STDERR}) )   { $this->{STDERR}  = \*{$this->{STDERR}} ;}
+  if ( $this->{HEADOUT} && !ref($this->{HEADOUT}) )  { $this->{HEADOUT} = \*{$this->{HEADOUT}} ;}
+  
+  if ( ref($this->{STDOUT})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
+  if ( ref($this->{STDIN})   !~ /^(?:GLOB)$/ )             { $this->{STDIN}   = undef ;}
+  if ( ref($this->{STDERR})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}  
+  if ( ref($this->{HEADOUT}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{HEADOUT} = undef ;}
+  
+  ${$this->{STDOUT}}  .= '' if ref($this->{STDOUT}) eq 'SCALAR' ;
+  ${$this->{STDERR}}  .= '' if ref($this->{STDERR}) eq 'SCALAR' ;
+  ${$this->{HEADOUT}} .= '' if ref($this->{HEADOUT}) eq 'SCALAR' ;
+  
+  my $env = $args{env} || $args{ENV} ;
+  
+  if ( $env ) {
+    $this->{ENV} = $env ;
+    if ( ref($this->{ENV}) ne 'HASH') { $this->{ENV} = undef ;}  
+  }
+  
+  $this->set_vars(
+  '%SIG' => \%SIG ,
+  '$/' => $/ ,
+  '$"' => $" ,
+  '$;' => $; ,
+  '$$' => $$ ,
+  '$^W' => 0 ,
+  ( $env ? ('%ENV' => $this->{ENV}) : () ) ,
+  ) ;
+  
+  untie(*{"$packname\::STDOUT"}) ;
+  untie(*{"$packname\::STDERR"}) ;
+  
+  if ( $this->{FLUSH} && !$this->{HEADOUT} && !$this->{AUTOHEAD} ) {
+    $this->{TIESTDOUT} = tie(*{"$packname\::STDOUT"} => 'Safe::World::stdoutsimple' , $this->{ROOT} , $this->{STDOUT} ) ;
+  }
+  else {
+    $this->{TIESTDOUT} = tie(*{"$packname\::STDOUT"} => 'Safe::World::stdout' , $this->{ROOT} , $this->{STDOUT} , $this->{FLUSH} , $this->{HEADOUT} , $this->{AUTOHEAD} , $this->{HEADSPLITTER} , $this->{ONCLOSEHEADERS} ) ;
+  }
+
+  $this->{TIESTDERR} = tie(*{"$packname\::STDERR"} => 'Safe::World::stderr' , $this->{ROOT} , $this->{STDERR} ) ;
+  
+  *{"$packname\::STDIN"}  = $this->{STDIN}  if $this->{STDIN} ;
+  
+  sync_evalx() ;
+  
+  return 1 ;
 }
 
 #################
@@ -281,10 +374,11 @@ sub eval {
     return ;
   }
 
-  #print "[[$_[1]]]\n" ;
+  ##print "[[$_[1]]]\n" ;
   if ( $_[0]->{INSIDE} ) {
     #print "EVAL>> INSIDE\n" ;
-    return eval("\@_ = () ; package main ; $_[1]") ;
+    ++$Safe::World::EVALX ;
+    return eval("no strict;\@_ = () ; package main ; $_[1]") ;
   }
   else {
     #print "EVAL>> OUT $Safe::World::NOW [$_]\n" ;
@@ -364,7 +458,7 @@ sub get_ref {
   elsif ($var_tp eq '@') { return \@{$pack.'::'.$var} ;}
   elsif ($var_tp eq '%') { return \%{$pack.'::'.$var} ;}
   elsif ($var_tp eq '*') { return \*{$pack.'::'.$var} ;}
-  else                   { return eval("package $pack ; \\$varfull") ;}
+  else                   { ++$Safe::World::EVALX ; return eval("package $pack ; \\$varfull") ;}
 }
 
 ################
@@ -388,7 +482,7 @@ sub get_ref_copy {
   elsif ($var_tp eq '@') { return [@{$pack.'::'.$var}] ;}
   elsif ($var_tp eq '%') { return {%{$pack.'::'.$var}} ;}
   elsif ($var_tp eq '*') { return \*{$pack.'::'.$var} ;}
-  else                   { return eval("package $pack ; \\$varfull") ;}
+  else                   { ++$Safe::World::EVALX ; return eval("package $pack ; \\$varfull") ;}
 }
 
 #######
@@ -473,7 +567,7 @@ sub set_vars {
       if    (ref($vars{$Key}) eq 'GLOB')  { *{$pack.'::'.$var} = $vars{$Key} ;}
       else                                { *{$pack.'::'.$var} = \*{$vars{$Key}} ;}
     }
-    else { eval("$Key = \$vars{\$Key} ;") ;}
+    else { ++$Safe::World::EVALX ; eval("$Key = \$vars{\$Key} ;") ;}
   }
   
   return 1 ;
@@ -838,6 +932,32 @@ sub flush {
   $this->{TIESTDOUT}->flush ;
 }
 
+###################
+# CLOSE_TIESTDOUT #
+###################
+
+sub close_tiestdout {
+  my $this = shift ;
+  
+  my $SAFE_WORLD_selected ;
+  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+
+  $this->{TIESTDOUT}->CLOSE ;
+}
+
+###################
+# CLOSE_TIESTDERR #
+###################
+
+sub close_tiestderr {
+  my $this = shift ;
+  
+  my $SAFE_WORLD_selected ;
+  if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
+
+  $this->{TIESTDERR}->CLOSE ;
+}
+
 #########
 # CLOSE #
 #########
@@ -846,6 +966,9 @@ sub close {
   my $this = shift ;
 
   $this->{EXIT} = undef ;
+  
+  $this->close_tiestdout ;
+  $this->close_tiestderr ;  
 
   $this->set('$SAFEWORLD',\undef) ;
   $this->flush(1) ;
@@ -862,9 +985,10 @@ sub close {
 sub DESTROY {
   my $this = shift ;
   return if $this->{DESTROIED} ;
-  $this->{DESTROIED} = 1 ;
 
   $this->close ;
+
+  $this->{DESTROIED} = 1 ;
   
   $this->{LINKED_PACKS}{$this->{ROOT}} = 1 ;
   $this->{LINKED_PACKS}{main} = 1 ;
@@ -958,7 +1082,7 @@ sub undef_pack {
       #print main::STDOUT "$packname>> $symb >> $fullname\n" ;
 
       if (defined &$fullname) {
-        if (my $p = prototype $fullname) { *{$fullname} = eval "sub ($p) {}" ;}
+        if (my $p = prototype $fullname) { ++$Safe::World::EVALX ; *{$fullname} = eval "sub ($p) {}" ;}
         else                             { *{$fullname} = $tmp_sub ;}
         undef &$fullname ;
       }
@@ -1140,6 +1264,8 @@ See the I<test.pl> script for more examples.
 
 =head2 new
 
+Create the World object.
+
 B<Arguments:>
 
 =over 10
@@ -1248,6 +1374,14 @@ Call a I<sub> inside the World and returning their values.
 
 Ensure that everything is finished and flushed. You can't evaluate codes after this!
 
+=head2 close_tiestdout()
+
+Close the tied STDOUT.
+
+=head2 close_tiestderr()
+
+Close the tied STDERR.
+
 =head2 eval (CODE)
 
 Evaluate a code inside the World and return their values.
@@ -1337,6 +1471,42 @@ Print some data to the STDERR of the world.
 Same as I<print>.
 
 Print some data to the STDOUT of the world.
+
+=head2 reset
+
+Reset the object flags. Soo, if it was closed (exited) can be reused.
+
+You can redefine this flags (sending this arguments):
+
+=over 10
+
+=item stdout (GLOB|SCALAR|CODE ref)
+
+The STDOUT target. Can be another GLOB/FILEHANDLER, a SCALAR reference, or a I<sub> reference.
+
+DEFAULT: I<\*main::STDOUT>
+
+=item stderr (GLOB|SCALAR|CODE ref)
+
+The STDERR target. Can be another GLOB/FILEHANDLER, a SCALAR reference, or a I<sub> reference.
+
+DEFAULT: I<\*main::STDERR>
+
+=item stdin (GLOB ref)
+
+The STDIN handler. Need to be a IO handler.
+
+DEFAULT: I<\*main::STDIN>
+
+=item headout (GLOB|SCALAR|CODE)
+
+The HEADOUT target. Can be another GLOB/FILEHANDLER, a SCALAR reference, or a I<sub> reference.
+
+=item env (HASH ref)
+
+The HASH reference for the internal I<%ENV> of the World.
+
+=back
 
 =head2 root
 
@@ -1462,8 +1632,6 @@ Graciliano M. P. <gm@virtuasites.com.br>
 I will appreciate any type of feedback (include your opinions and/or suggestions). ;-P
 
 Enjoy!
-
-B<** This is the 1st version of the module, soo it needs a lot of tests yet!>
 
 =head1 THANKS
 

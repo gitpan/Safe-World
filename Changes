@@ -1,5 +1,13 @@
 Revision history for Perl extension Safe::World.
 
+0.03  30 Nov 2003
+      - No more dependence of Safe. Own implementation of Safe at Safe::World::Compartment,
+        with simpler code and less sub call and variables criations for reval().
+      - use of select_static on initialization to avoid new selections.
+      - Fixed some minor bug in the headers handler for HEADOUT.
+      - Added method reset().
+      - Added methods close_tiestdout() and close_tiestderr().
+
 0.02  30 Nov 2003
       - Fixed tests on Perl-5.8+ & Perl-5.6.2.
       - Fixed link_world() for Perl-5.8+ & Perl-5.6.2.

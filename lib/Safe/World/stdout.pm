@@ -130,8 +130,6 @@ sub print_stdout {
     }
   }
   else {
-    
-  
     if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
       $this->{HEADER_CLOSED} = 1 ;
       my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
@@ -184,21 +182,28 @@ sub close_headers {
   my $this = shift ;
   return if !$this->{AUTOHEAD} ;
   
+  $this->{AUTOHEAD} = undef ;
+
   if ( $this->{AUTOHEAD_DATA} ne '' ) {
-    $this->{AUTOHEAD} = undef ;
-    $this->print_headout( delete $this->{AUTOHEAD_DATA} ) ;
+    my ($headers , $end) = $this->check_headsplitter() ;
+    if ($headers ne '' || $end ne '') {
+      $this->print_headout($headers) if $headers ne '' ;
+      $this->print($end) if $end ne '' ;
+    }
+    else {
+      $this->print( delete $this->{AUTOHEAD_DATA} ) ;
+    }
   }
   
-  $this->{AUTOHEAD} = undef ;
-  
-  $this->{HEADER_CLOSED} = 1 ;
-  
-  if ( $this->{ONCLOSEHEADERS} ) {
+  if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
+    $this->{HEADER_CLOSED} = 1 ;
     my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
     my $oncloseheaders = $this->{ONCLOSEHEADERS} ;
     &$oncloseheaders( $Safe::World::NOW , $this->headers ) ;
     select($sel) if $sel ;
   }
+
+  $this->{HEADER_CLOSED} = 1 ;
   
   return 1 ;
 }
@@ -267,6 +272,7 @@ sub FILENO {
 
 sub CLOSE {
   my $this = shift ;
+  $this->{AUTO_FLUSH} = 1 ;
   $this->close_headers ;
   $this->flush ;
 }
