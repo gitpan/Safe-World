@@ -23,7 +23,7 @@ use Safe::World::stderr ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.01' ;
+$VERSION = '0.02' ;
 
 ########
 # VARS #
@@ -237,6 +237,8 @@ sub new {
   ) ;
 
   $this->set('%INC',{}) ;
+  
+  $this->eval("no strict ;") ; ## just to load strict inside the compartment.
 
   return $this ;
 }
@@ -504,7 +506,7 @@ sub share_vars {
       $var =~ s/^(\W)/$1$from_pack\::/ ;    
     }
 
-    $this->{SHARING}{$var} = {} ;
+    $this->{SHARING}{$var} = { IN => undef , OUT => undef } ;
   }
 
   return 1 ;
@@ -649,7 +651,7 @@ sub link_world {
   my $table = *{"$world_root\::"}{HASH} ;
   
   foreach my $Key ( keys %$table ) {
-    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*$world_root\::/ && $Key !~ /^(?:STDOUT|STDERR|.*?::)$/) {
+    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*(?:main|$world_root)::/ && $Key !~ /^(?:STDOUT|STDERR|.*?::)$/ && $Key !~ /[^\w:]/s) {
       *{"$world_root\::WORLDSHARE::$Key"} = \${"$world_root\::$Key"} ;
       *{"$world_root\::WORLDSHARE::$Key"} = \@{"$world_root\::$Key"} ;
       *{"$world_root\::WORLDSHARE::$Key"} = \%{"$world_root\::$Key"} ;
@@ -685,7 +687,7 @@ sub unlink_world {
   my $table = *{"$world_root\::"}{HASH} ;
   
   foreach my $Key ( keys %$table ) {
-    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*$root\::(.*)/ && $Key !~ /^(?:STDOUT|STDERR|.*?::)$/) {
+    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*(?:main|$root)::(.*)/ && $Key !~ /^(?:STDOUT|STDERR|.*?::)$/ && $Key !~ /[^\w:]/s) {
       $$table{$Key} = "*$world_root\::WORLDSHARE::$1" ;
     }
   }
@@ -999,7 +1001,7 @@ Safe::World - Create multiple virtual instances of a Perl interpreter that can b
 With I<Safe::World> you can create multiple virtual instances/compartments of a Perl interpreter,
 that will work/run without touch the other instances/compartments and mantaining the main interpreter normal.
 
-Each instance (WORLD object) has their own STDOUT, STDERR and STDIN handlers, also has a fake HEADOUT output implemented inside the STDOUT.
+Each instance (WORLD object) has their own STDOUT, STDERR and STDIN handlers, also has a fake HEADOUT output for the headers implemented inside the STDOUT.
 Soo, you can use this to redirect the outputs of the WORLD object to a FILEHANDLER, SCALAR or a SUB.
 
 The module I<Safe::World> was created for 3 purposes:
@@ -1022,12 +1024,17 @@ or in the case of HTML output, be displayed inside I<comment> tags, instead to g
 But to implement a full WORLD warn(), die() and exit() need to be overwrited too.
 Soo you can control if exit() will really exit from the virtual interpreter, and redirect the warn messages.
 
-=item 3. A WORLD object (a virtual Perl interpreter) that can be linked/assembled with other WORLD objects, and work/run as if the objects where only one, than be able to unlink/disassemble them.
+=item 3. A WORLD object (a virtual Perl interpreter) that can be linked/assembled with other WORLD objects, and work/run as if the objects where only one, then be able to unlink/disassemble them.
 
 This is the advanced purpose, that need all the previous resources, and most important thing of I<Safe::World>.
 Actually this was projected to work with I<mod_perl>, soo the Perl codes can be runned in different compartments,
 but can have some part of the code cached in memory, specially the Perl Modules (Classes) that need to be loaded all the time.
-Heres how to implement that:
+
+Soo, you can load your classes in one World, and your script/page in other World, then link them and run your code normally.
+Then after run it you unlink the 2 Worlds, and only CLEAN the World with your script/page,
+and now you can keep the 1st World with your Classes cached, to link it again with the next script/page to run.
+
+Here's how to implement that:
 
 =over 10
 
@@ -1443,7 +1450,7 @@ enabling multiple executions of scripts in one Perl interpreter,
 and also brings a way to cache loaded modules, making the execution of multiple
 scripts and mod_perl pages faster and with less memory.
 
-Actually this was first writed as I<HPL::PACK module>, than I haved moved it to I<Safe::World> to be shared with other projects. ;-P
+Actually this was first writed as I<HPL::PACK module>, then I haved moved it to I<Safe::World> to be shared with other projects. ;-P
 
 ** Note that was hard to implement all the enverioment inside I<Safe::World>,
 soo if you have ideas or suggestions to make this work better, please send them. ;-P
@@ -1457,6 +1464,13 @@ I will appreciate any type of feedback (include your opinions and/or suggestions
 Enjoy!
 
 B<** This is the 1st version of the module, soo it needs a lot of tests yet!>
+
+=head1 THANKS
+
+Thanks to:
+
+Elizabeth Mattijsen <liz@dijkmat.nl>, to test it in different Perl versions and report bugs.
+
 
 =head1 COPYRIGHT
 

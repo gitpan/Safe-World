@@ -40,11 +40,11 @@ sub new {
   $this->{WORLD}->{SELECT}{PREVSTDERR} = $this->{PREVSTDERR} = *main::STDERR{IO} ;
   $this->{WORLD}->{SELECT}{PREVSUBWARN} = $this->{PREVSUBWARN} = $SIG{__WARN__} ;
   $this->{WORLD}->{SELECT}{PREVSUBDIE} = $this->{PREVSUBDIE} = $SIG{__DIE__} ;
-  
-  *main::STDERR = \*{"$this->{WORLD}->{ROOT}\::STDERR"} ;
+
+  open (STDERR,">&$this->{WORLD}->{ROOT}::STDERR") ;
   $SIG{__WARN__} = \&print_stderr ;
   $SIG{__DIE__} = \&handle_die ;
-
+  
   foreach my $var ( keys %{ $this->{WORLD}->{SHARING} } ) {
     $this->{WORLD}->{SHARING}{$var}{OUT} = &out_get_ref_copy($var) ;
     if ( $this->{WORLD}->{SHARING}{$var}{IN} ) {
@@ -130,7 +130,7 @@ sub out_set {
   my ($var_tp,$name) = ( $var =~ /([\$\@\%\*])(\S+)/ );
   $name =~ s/^{'(\S+)'}$/$1/ ;
   $name =~ s/^main::// ;
-
+  
   if    ($var_tp eq '$') { ${'main::'.$name} = $val ;}
   elsif ($var_tp eq '@') { @{'main::'.$name} = @{$val} ;}
   elsif ($var_tp eq '%') { %{'main::'.$name} = %{$val} ;}
