@@ -143,6 +143,24 @@ sub buffer_data {
 }
 
 #########
+# BLOCK #
+#########
+
+sub block {
+  my $this = shift ;
+  $this->{BLOCKED} = 1 ;
+}
+
+###########
+# UNBLOCK #
+###########
+
+sub unblock {
+  my $this = shift ;
+  $this->{BLOCKED} = undef ;
+}
+
+#########
 # PRINT #
 #########
 
@@ -155,6 +173,8 @@ sub print { &PRINT ;}
 sub print_stdout {
   #print main::STDOUT "std>> $| [[$_[1]]] [[$_[0]->{BUFFER}]]\n" ;
   my $this = shift ; return 1 if $_[0] eq '' ;
+  
+  return if $this->{BLOCKED} ;
   
   my $stdout = $this->{STDOUT} ;
   

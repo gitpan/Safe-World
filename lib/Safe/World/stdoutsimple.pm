@@ -38,6 +38,24 @@ sub buffer_data {}
 sub flush {}
 
 #########
+# BLOCK #
+#########
+
+sub block {
+  my $this = shift ;
+  $this->{BLOCKED} = 1 ;
+}
+
+###########
+# UNBLOCK #
+###########
+
+sub unblock {
+  my $this = shift ;
+  $this->{BLOCKED} = undef ;
+}
+
+#########
 # PRINT #
 #########
 
@@ -50,6 +68,8 @@ sub print { &PRINT ;}
 sub print_stdout {
   my $this = shift ;
   my $stdout = $this->{STDOUT} ;
+  
+  return if $this->{BLOCKED} ;
   
   if ( ref($stdout) eq 'SCALAR' ) { $$stdout .= $_[0] ;}
   elsif ( ref($stdout) eq 'CODE' ) {

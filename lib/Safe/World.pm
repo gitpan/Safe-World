@@ -15,7 +15,7 @@ package Safe::World ;
 use strict qw(vars);
 
 use vars qw($VERSION @ISA) ;
-$VERSION = '0.13' ;
+$VERSION = '0.14' ;
 
 require overload ;
 
@@ -1511,8 +1511,13 @@ sub use_shared {
     my %packs_prev = map { $_ => 1 } ( scanpacks( $this->{ROOT} ) ) ;
     
     my %inc_now = %INC ;
-
-    $this->eval_no_warn("no strict ;require $module") ;
+    
+    my $use_cmd = "no strict ; require $module ;" ;
+    if ( @_ && join(" ", @_) =~ /\S/s ) {
+      $use_cmd .= " $module\::import('$module', qw\0 ". join(" ", @_) ." \0 ) if defined &$module\::import ;" ;
+    }
+    
+    $this->eval_no_warn($use_cmd) ;
     
     if ( $@ ) {
       return "Error on loading $module\n$@" ;
@@ -1942,6 +1947,16 @@ sub restore_stdout {
   $this->{TIESTDOUT}->{REDIRECT} = @{ $this->{TIESTDOUT}->{REDIRECT_STACK} } ? pop( @{ $this->{TIESTDOUT}->{REDIRECT_STACK} } ) : undef ;
 }
 
+#############
+# BLOCK IOS #
+#############
+
+sub block_stdout { $_[0]->{TIESTDOUT}->block if $_[0]->{TIESTDOUT} ;}
+sub unblock_stdout { $_[0]->{TIESTDOUT}->unblock if $_[0]->{TIESTDOUT} ;}
+
+sub block_stderr { $_[0]->{TIESTDERR}->block if $_[0]->{TIESTDERR} ;}
+sub unblock_stderr { $_[0]->{TIESTDERR}->unblock if $_[0]->{TIESTDERR} ;}
+
 #########
 # FLUSH #
 #########
@@ -2039,7 +2054,8 @@ sub DESTROY {
   my $this = shift ;
   return if $this->{DESTROIED} ;
   
-  ##print main::STDOUT "DESTSAFE>> $this->{ROOT}\n" ;
+  ##my @call = caller(1) ;
+  ##print main::STDOUT "DESTSAFE>> $this->{ROOT} [@call]\n" ;
 
   $this->unlink_all_worlds ;
   $this->close ;
@@ -2198,7 +2214,7 @@ sub undef_pack {
         #if (defined $$fullname) { undef $$fullname ;}
         untie $$fullname if tied $$fullname ;
         undef $$fullname ;
-
+        
         undef *{$fullname} ;
       };
     }
@@ -2217,7 +2233,7 @@ sub undef_pack {
 }
 
 sub END {
-
+  
   if (0)  {
     foreach my $Key ( sort {$a <=> $b} keys %{ $BLESS_TABLE->{POOL} } ) {
       my $Value = $BLESS_TABLE->{POOL}{$Key} ;
@@ -2528,6 +2544,14 @@ I<Sub> to be called when the WORLD is selected to evaluate codes inside it.
 I<Sub> to be called when the WORLD is unselected, just after evaluate the codes.
 
 =back
+
+=head2 block_stdout ; block_stderr
+
+Block the output to STDOUT/STDERR of the WORLD.
+
+=head2 unblock_stdout ; unblock_stderr
+
+UNblock the output to STDOUT/STDERR of the WORLD.
 
 =head2 CLEAN
 

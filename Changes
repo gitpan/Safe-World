@@ -1,6 +1,11 @@
 Revision history for Perl extension Safe::World.
 
 
+0.14  12 Sept 2004
+      - Added methods [un]block_[stdout|stderr].
+      - Added option to paste arguments for use_shared('module::foo' , qw(bar baz)).
+
+
 0.13  9 Apr 2004
       - Fixed PREREQ_PM, adding Hash::NoRef to it.
 
