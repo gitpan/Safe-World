@@ -14,30 +14,37 @@ package Safe::World::Scope ;
 
 use strict qw(vars);
 
-our ($VERSION , @ISA) ;
-$VERSION = '0.02' ;
+use vars qw($VERSION @ISA) ;
+$VERSION = '0.03' ;
 
-my ($HOLE,%HOOK_IDS) ;
+my ($HOLE , %HOOK_IDS , %SCOPES_CACHE , %TABLES) ;
 
 #######
-# NEW # package
+# NEW # package , no_cache , only_call
 #######
 
 sub new {
   my $class = shift ;
-  my $this = bless({} , $class) ;
-  my ($package) = @_ ;
+  my ($package , $no_cache , $only_call) = @_ ;
   
   $package =~ s/[^\w:]//gs ;
   $package =~ s/[:\.]+/::/gs ;
   $package =~ s/^:+//g ;
   $package =~ s/:+$//g ;
   
+  return $SCOPES_CACHE{$package} if ( !$no_cache && $SCOPES_CACHE{$package} ) ;
+  
+  delete $TABLES{$package} if $no_cache ;
+  
+  my $this = bless({} , $class) ;
+  
   $this->{PACKAGE} = $package ;
   
-  $this->{HOOK} = new_hook($package) ;
-  
+  $this->{HOOK} = new_hook($package,$only_call) ;
+
   $this->{STASH} = $this->_STASH_REF_NOW ;
+  
+  $SCOPES_CACHE{$package} = $this ;
   
   return $this ;
 }
@@ -46,7 +53,10 @@ sub new {
 # _STASH_REF_NOW #
 ##################
 
-sub _STASH_REF_NOW { \%{ $_[0]->{PACKAGE} . '::' } ;}
+sub _STASH_REF_NOW {
+  my $ref = \%{ $_[0]->{PACKAGE} . '::' } ;
+  return "$ref" ;
+}
 
 ############
 # NEW_HOOK #
@@ -54,36 +64,48 @@ sub _STASH_REF_NOW { \%{ $_[0]->{PACKAGE} . '::' } ;}
 
 sub new_hook {
   my $class = shift ;
+  my $only_call = shift ;
+  
   my $this = bless({} , $class) ;
   
   $this->{PACKAGE} = $class ;
   
-  my @table = &scanpack_table($class) ;
-  
-  foreach my $table_i ( @table ) {
-    if ( $table_i =~ /^([\$\@\%\*\&])(\Q$class\E:*)(.*)/ ) {
-      my ($tp , $sub , $name) = ($1,"$2$3",$3) ;
-      next if $name eq '__SAFEWORLD_HOOK__' ;
-      
-      if    ( $tp eq '$' )  { $this->{$tp}{$name} = \$$sub ;}
-      elsif ( $tp eq '@' )  { $this->{$tp}{$name} = \@$sub ;}
-      elsif ( $tp eq '%' )  { $this->{$tp}{$name} = \%$sub ;}
-      elsif ( $tp eq '*' )  { $this->{$tp}{$name} = \&$sub ;}
-      elsif ( $tp eq '&' )  { $this->{$tp}{$name} = \&$sub ;}      
-    }
-  }
-  
   my $hook_sub = "$class\::__SAFEWORLD_HOOK__" ;
   
   if ( !defined &$hook_sub ) {
-    *{$hook_sub} = \&__SAFEWORLD_HOOK__ ;
+    my @table = &scanpack_table($class) ;
+    my $table = {} ;
+    
+    foreach my $table_i ( @table ) {
+      if ( $table_i =~ /^([\$\@\%\*\&])(\Q$class\E:*)(.*)/ ) {
+        my ($tp , $sub , $name) = ($1,"$2$3",$3) ;
+        next if $name eq '__SAFEWORLD_HOOK__' ;
+        
+        if    ( $tp eq '$' )  { $table->{$tp}{$name} = \$$sub ;}
+        elsif ( $tp eq '@' )  { $table->{$tp}{$name} = \@$sub ;}
+        elsif ( $tp eq '%' )  { $table->{$tp}{$name} = \%$sub ;}
+        elsif ( $tp eq '*' )  { $table->{$tp}{$name} = \&$sub ;}
+        elsif ( $tp eq '&' )  { $table->{$tp}{$name} = \&$sub ;}      
+      }
+    }
+    
+    $TABLES{$class} = $table ;
+  
+    *{$hook_sub} = sub {
+      my $hook = shift ;
+      &__SAFEWORLD_HOOK__($hook,$table,@_) ;
+    } ;
     
     ## Overload DESTROY to skeep DESTROY of HOOKs.
-    if ( $this->{'&'}{DESTROY} ) {
+    if ( $table->{'&'}{DESTROY} ) {
       my $dest_ref = \&{"$class\::DESTROY"} ;
       *{"$class\::DESTROY"} = sub { return if $HOOK_IDS{"$_[0]"} ; &$dest_ref(@_) ;}
     }
     
+  }
+  
+  if ( $only_call ) {
+    $TABLES{$class}{only_call} = "$this" ;
   }
   
   $HOOK_IDS{"$this"} = 1 ;
@@ -131,32 +153,35 @@ sub scanpack_table {
 
 sub __SAFEWORLD_HOOK__ {
   my $__HOOK__ = shift ;
+  my $__TABLE__ = shift ;
 
   if ( $_[0] eq 'call' ) { shift ;
     my $name = shift ;
-    my $sub = $__HOOK__->{'&'}{$name} ;
+    my $sub = $__TABLE__->{'&'}{$name} ;
     return &$sub(@_) if $sub ;
     die("Undefined subroutine &$__HOOK__->{PACKAGE}\::$name") ;
     return undef ;
   }
   
+  elsif ( $__TABLE__->{only_call} && $__TABLE__->{only_call}{"$__HOOK__"} ) { return ;}
+  
   elsif ( $_[0] eq 'get' ) { shift ;
-    if    ( $_[0] eq '$' )  { return ${ $__HOOK__->{'$'}{$_[1]} } ;}
-    elsif ( $_[0] eq '@' )  { return @{ $__HOOK__->{'@'}{$_[1]} } ;}
-    elsif ( $_[0] eq '%' )  { return %{ $__HOOK__->{'%'}{$_[1]} } ;}
-    elsif ( $_[0] eq '*' )  { return *{ $__HOOK__->{'*'}{$_[1]} } ;}
-    elsif ( $_[0] eq '\$' ) { return $__HOOK__->{'$'}{$_[1]} ;}
-    elsif ( $_[0] eq '\@' ) { return $__HOOK__->{'@'}{$_[1]} ;}
-    elsif ( $_[0] eq '\%' ) { return $__HOOK__->{'%'}{$_[1]} ;}
-    elsif ( $_[0] eq '\*' ) { return $__HOOK__->{'*'}{$_[1]} ;}
+    if    ( $_[0] eq '$' )  { return ${ $__TABLE__->{'$'}{$_[1]} } ;}
+    elsif ( $_[0] eq '@' )  { return @{ $__TABLE__->{'@'}{$_[1]} } ;}
+    elsif ( $_[0] eq '%' )  { return %{ $__TABLE__->{'%'}{$_[1]} } ;}
+    elsif ( $_[0] eq '*' )  { return *{ $__TABLE__->{'*'}{$_[1]} } ;}
+    elsif ( $_[0] eq '\$' ) { return $__TABLE__->{'$'}{$_[1]} ;}
+    elsif ( $_[0] eq '\@' ) { return $__TABLE__->{'@'}{$_[1]} ;}
+    elsif ( $_[0] eq '\%' ) { return $__TABLE__->{'%'}{$_[1]} ;}
+    elsif ( $_[0] eq '\*' ) { return $__TABLE__->{'*'}{$_[1]} ;}
   }
   
   elsif ( $_[0] eq 'set' ) { shift ;
     my $__REF__ = ref($_[2]) ;
-    if    ( $_[0] eq '$' )  { return ${ $__HOOK__->{'$'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
-    elsif ( $_[0] eq '@' )  { return @{ $__HOOK__->{'@'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
-    elsif ( $_[0] eq '%' )  { return %{ $__HOOK__->{'%'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
-    elsif ( $_[0] eq '*' )  { return *{ $__HOOK__->{'*'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
+    if    ( $_[0] eq '$' )  { return ${ $__TABLE__->{'$'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
+    elsif ( $_[0] eq '@' )  { return @{ $__TABLE__->{'@'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
+    elsif ( $_[0] eq '%' )  { return %{ $__TABLE__->{'%'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
+    elsif ( $_[0] eq '*' )  { return *{ $__TABLE__->{'*'}{$_[1]} } = $__REF__ eq 'SCALAR' ? ${$_[2]} : $__REF__ eq 'ARRAY' ? @{$_[2]} : $__REF__ eq 'HASH' ? %{$_[2]} : $_[2] ;}
   }
   
   return ;
@@ -181,8 +206,8 @@ sub call_hole {
   
   &_load_HOLE if !$HOLE ;
   
-  if ( $this->_STASH_REF_NOW != $this->{STASH} ) {
-    my $sub_ref = $this->{HOOK}->{'&'}{$sub} ;
+  if ( $this->_STASH_REF_NOW ne $this->{STASH} ) {
+    my $sub_ref = $TABLES{ $this->{HOOK}->{PACKAGE} }->{'&'}{$sub} ;
     return $HOLE->call($sub_ref,@_) ;
   }
   
@@ -359,9 +384,29 @@ Soo, using I<NEW()> a I<call_hole()> is made to ensure that bless() works fine.
 
 =head1 METHODS
 
-=head2 new (PACKAGE)
+=head2 new (PACKAGE , NO_CACHE , ONLY_CALL)
 
-Create a new Scope object. Has only one argmunet, the I<PACKAGE> name.
+Create a new Scope object.
+
+B<Arguments:>
+
+=over 10
+
+=item PACKAGE
+
+The package name to create the scope object.
+
+=item NO_CACHE (bool) I<*optional>
+
+If I<TRUE> tells to not use a cached scope object.
+
+I<** By default all the scope objects are cached, soo if you try to create 2 scopes objects at the same package you are actually creating only one.>
+
+=item ONLY_CALL (bool) I<*optional>
+
+If I<TRUE> tells to only enable the method I<call()>. I<get()> and I<set()> will be denied, since they can be used to chage the variables of a package.
+
+=back
 
 =head2 call (SUB , ARGS)
 

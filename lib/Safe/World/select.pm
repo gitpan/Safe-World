@@ -14,7 +14,7 @@ package Safe::World::select ;
 
 use strict qw(vars);
 
-our ($VERSION , @ISA) ;
+use vars qw($VERSION @ISA) ;
 $VERSION = '0.02' ;
 
 ##########
@@ -177,11 +177,10 @@ sub print_stderr {
 
 sub handle_die {
   my $core_exit = 1 if $_[0] =~ /#CORE::GLOBAL::exit#/ ;
-  my $exit = 1 if $core_exit ;
 
-  $Safe_World_NOW->{EXIT} = 1 if $exit ;
+  $Safe_World_NOW->{EXIT} = 1 if $core_exit ;
   $Safe_World_NOW->print_stderr(@_) if !$core_exit ;
-  $Safe_World_NOW->close if $exit ;
+  $Safe_World_NOW->close if $core_exit ;
   
   $@ = undef if $core_exit ;
   

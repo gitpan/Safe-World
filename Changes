@@ -1,5 +1,14 @@
 Revision history for Perl extension Safe::World.
 
+
+0.07  21 Dec 2003
+      - Added cache of scopes at Safe::World::Scope.
+      - Blocked access to the symbols tables through Safe::World::Scope objects.
+      - Fixed bug on unlink_world(), where the call to unlink_package() was wrong.
+      - Removed select() of previous output on print_stderr(), due problems when called from internal erros,
+        like use on inexistent modules. But the select() of previous output on print_stdout() is kept to avoid self loops!
+
+
 0.06  19 Dec 2003
       - Added method op_deny, op_deny_only, op_permit, op_permit_only.
       - Fixed minor bug on eval(), when called from inside.

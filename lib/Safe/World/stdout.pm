@@ -14,7 +14,7 @@ package Safe::World::stdout ;
 
 use strict qw(vars);
 
-our ($VERSION , @ISA) ;
+use vars qw($VERSION @ISA) ;
 $VERSION = '0.02' ;
 
 ##########

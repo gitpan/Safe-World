@@ -22,8 +22,8 @@ use Safe::World::stderr ;
 
 use strict qw(vars);
 
-our ($VERSION , @ISA) ;
-$VERSION = '0.06' ;
+use vars qw($VERSION @ISA) ;
+$VERSION = '0.07' ;
 
 ##########
 # SCOPES #
@@ -110,10 +110,8 @@ sub EXIT {
   if ( $NOW && ref($NOW) eq 'Safe::World' ) {
     my $exit ;
     if ( $NOW->{ONEXIT} && !$NOW->{EXIT} ) {
-      my $sel = select( $NOW->{SELECT}{PREVSTDOUT} ) if $NOW->{SELECT}{PREVSTDOUT} ;
-        my $sub = $NOW->{ONEXIT} ;
-        $exit = &$sub($NOW , @_) ;
-      select($sel) if $sel ;
+      my $sub = $NOW->{ONEXIT} ;
+      $exit = &$sub($NOW , @_) ;
     }
     die('#CORE::GLOBAL::exit#') unless $exit eq '0' ;
   }
@@ -996,7 +994,7 @@ sub unlink_world {
   my $inc = \%{$this->{ROOT}.'::INC'} ;
   my $pm ;
   foreach my $shared_pack ( @shared_pack ) {
-    $this->unlink_pack("$world_root\::$shared_pack") ;
+    $this->unlink_pack($shared_pack) ;
     $pm = $world->{SHAREDPACK_PM}{$shared_pack} ;
     delete $$inc{$pm} if $$inc{$pm} eq '#shared#' ;
   }
@@ -1260,6 +1258,8 @@ sub close {
 sub DESTROY {
   my $this = shift ;
   return if $this->{DESTROIED} ;
+  
+  ##print main::STDOUT "DEST>> $this->{ROOT}\n" ;
   
   $this->{DESTROIED} = 1 ;
 

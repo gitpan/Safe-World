@@ -14,7 +14,7 @@ package Safe::World::stderr ;
 
 use strict qw(vars);
 
-our ($VERSION , @ISA) ;
+use vars qw($VERSION @ISA) ;
 $VERSION = '0.02' ;
 
 ##########
@@ -43,9 +43,7 @@ sub print_stderr {
   
   if ( ref($stderr) eq 'SCALAR' ) { $$stderr .= $_[0] ;}
   elsif ( ref($stderr) eq 'CODE' ) {
-    my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
     &$stderr($Safe_World_NOW , $_[0]) ;
-    select($sel) if $sel ;
   }
   else {
     my $sel = \*main::STDERR ;
