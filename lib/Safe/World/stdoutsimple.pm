@@ -51,9 +51,9 @@ sub print_stdout {
   
   if ( ref($stdout) eq 'SCALAR' ) { $$stdout .= $_[0] ;}
   elsif ( ref($stdout) eq 'CODE' ) {
-    my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+    my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
     &$stdout($Safe_World_NOW , $_[0]) ;
-    select($sel) if $sel ;
+    &Safe::World::SELECT($sel) if $sel ;
   }
   else { print $stdout $_[0] ;}
 

@@ -72,9 +72,10 @@ sub new_hook {
   
   my $hook_sub = "$class\::__SAFEWORLD_HOOK__" ;
   
-  if ( !defined &$hook_sub ) {
+  my $table ;
+  if ( !defined $TABLES{$class} ) {
     my @table = &scanpack_table($class) ;
-    my $table = {} ;
+    $table = {} ;
     
     foreach my $table_i ( @table ) {
       if ( $table_i =~ /^([\$\@\%\*\&])(\Q$class\E:*)(.*)/ ) {
@@ -90,7 +91,11 @@ sub new_hook {
     }
     
     $TABLES{$class} = $table ;
+  }
+  else { $table = $TABLES{$class} ;}
   
+  if ( !defined &$hook_sub ) {
+
     *{$hook_sub} = sub {
       my $hook = shift ;
       &__SAFEWORLD_HOOK__($hook,$table,@_) ;
@@ -210,6 +215,7 @@ sub call_hole {
   
   if ( $this->_STASH_REF_NOW ne $this->{STASH} ) {
     my $sub_ref = $TABLES{ $this->{HOOK}->{PACKAGE} }->{'&'}{$sub} ;
+    die("Undefined subroutine &$this->{HOOK}->{PACKAGE}::$sub") if !$sub_ref ;
     return $HOLE->call($sub_ref,@_) ;
   }
   
@@ -222,8 +228,8 @@ sub call_hole {
 
 sub _load_HOLE {
   if ( !$HOLE ) {
-    require Safe::Hole ;
-    $HOLE = new Safe::Hole ;
+    require Safe::World::Hole ;
+    $HOLE = new Safe::World::Hole ;
   }
 }
 

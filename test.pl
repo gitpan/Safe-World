@@ -3,12 +3,136 @@
 ###use Data::Dumper ; print Dumper( $world ) ;
 
 use Test;
-BEGIN { plan tests => 70 } ;
+BEGIN { plan tests => 73 } ;
 
 use Safe::World ;
 
 use strict ;
 use warnings qw'all' ;
+
+#########################
+{
+
+
+  my $tmp ;
+  my $world_cache = Safe::World->new(
+  is_cache  => 1 ,
+  stdout    => \$tmp ,
+  stderr    => \$tmp ,
+  flush     => 1 ,
+  no_set_safeworld => 1 ,
+  no_strict        => 1 ,
+  ) ;
+
+  my ( $stdout , $stderr , $headout ) ;
+
+  my $world = Safe::World->new(
+  stdout       => \$stdout ,
+  stderr       => \$stderr ,
+  headout      => \$headout ,
+  no_strict    => 1,
+  headsplitter => 'HTML' ,
+  autohead     => 1 ,
+  on_closeheaders => sub {
+                       my ( $pack , $headers ) = @_ ;
+                       $pack->print_stdout("[[$headers]]") ;
+                       $pack->headers('') ;
+                       return 1 ;
+                     } ,
+  ) ;
+  
+  $| = 0 ;
+  
+  use Safe::World::Scope ;
+
+  my $SCOPE_Safe_World ;
+  
+  sub Safe::World::use_cached {
+    my $this = shift ;
+    my $module = shift ;
+    $SCOPE_Safe_World->call_hole('_use_cached_call_hole',$world,$world_cache,$module) ;
+  }
+  
+  sub Safe::World::_use_cached_call_hole {
+    my $world = shift ;
+    my $world_cache = shift ;
+    my $module = shift ;
+    
+    my $pm = $module ;
+    $pm =~ s/::/\//g ; $pm .= '.pm' ;
+    
+    my ( $link_pack , $inc ) = $world_cache->use_shared($module) ;
+    
+    if ( $link_pack && !ref($link_pack) ) {
+      warn($link_pack) ;
+      return ;
+    }
+    
+    my $inside = $world->{INSIDE} ;
+    $world->{INSIDE} = undef ;
+    
+    if ( ref($link_pack) eq 'ARRAY' ) {
+      foreach my $link_pack_i ( @$link_pack ) {
+        $world->link_pack($link_pack_i) ;
+      }
+    }
+    
+    if ( ref($inc) eq 'HASH' ) {
+      foreach my $Key ( keys %$inc ) { $INC{$Key} = $$inc{$Key} ;}
+    }
+    
+    $world->{INSIDE} = $inside ;  
+    
+    return 1 ;
+  }
+  
+  $SCOPE_Safe_World = new Safe::World::Scope('Safe::World',1) ;
+  
+  $world->print_header("X-Powered-By: Safe::World\n") ;
+  $world->print_header("Content-type: text/html\n\n") ;
+  
+  $world->eval(q`
+     $SAFEWORLD->use_cached('Data::Dumper') ;
+  `);
+  
+  $world->eval(q`
+    my @inc = (
+    'Carp.pm=' . ( $INC{'Carp.pm'} eq '#shared#' ? 1 : 0 ) ,
+    'Exporter.pm=' . ( $INC{'Exporter.pm'} eq '#shared#' ? 1 : 0 ) ,
+    'Data/Dumper.pm=' . ( $INC{'Data/Dumper.pm'} eq '#shared#' ? 1 : 0 ) ,
+    'XSLoader.pm=' . ( $INC{'XSLoader.pm'} eq '#shared#' ? 1 : 0 ) ,
+    'warnings/register.pm=' . ( $INC{'warnings/register.pm'} eq '#shared#' ? 1 : 0 ) ,
+    'warnings.pm=' . ( $INC{'warnings.pm'} eq '#shared#' ? 1 : 0 ) ,
+    'overload.pm=' . ( $INC{'overload.pm'} eq '#shared#' ? 1 : 0 ) ,
+    ) ;
+
+    print Data::Dumper::Dumper( \@inc ) ;
+  `);
+  
+  $world->close ;
+
+  $world = undef ;
+ 
+  $stdout =~ s/\n[ \t]*/\n/gs ;
+  
+  ok ($stdout , q`[[X-Powered-By: Safe::World
+Content-type: text/html
+
+]]$VAR1 = [
+'Carp.pm=1',
+'Exporter.pm=1',
+'Data/Dumper.pm=1',
+'XSLoader.pm=1',
+'warnings/register.pm=1',
+'warnings.pm=1',
+'overload.pm=1'
+];
+`) ;
+ 
+  ok($stderr , '') ;
+  ok($headout , '') ;
+
+}
 
 #########################
 {
@@ -50,12 +174,14 @@ use warnings qw'all' ;
 
   $world = undef ;
   
+  $stdout =~ s/SAFEWORLD3::STDOUT/main::STDOUT/gs ;
+  
   ok($stdout , q`[[X-Powered-By: Safe::World
 Content-type: text/html
 
 ]]<pre>
 
-content2 SAFEWORLD1::STDOUT
+content2 main::STDOUT
 </pre>
 `);
 
@@ -614,6 +740,7 @@ end!
 
   ## Can't have warnings for constant sub redefinition! Bug at Perl-5.8.x
   ok($stderr , '') ;
+  
 }
 #########################
 {

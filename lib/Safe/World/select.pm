@@ -49,8 +49,8 @@ sub new {
   $this->{WORLD}->{SELECT}  = {} if !$this->{WORLD}->{SELECT} ;
   $this->{WORLD}->{SHARING} = {} if !$this->{WORLD}->{SHARING} ;
   
-  my $prevstdout = select( \*{"$this->{WORLD}->{ROOT}\::main::STDOUT"} ) ;
-  $this->{WORLD}->{SELECT}{PREVSTDOUT} = $this->{PREVSTDOUT} = \*{$prevstdout} ;
+  my $prevstdout = &Safe::World::SELECT( "$this->{WORLD}->{ROOT}\::STDOUT" ) ;
+  $this->{WORLD}->{SELECT}{PREVSTDOUT} = $this->{PREVSTDOUT} = [$prevstdout , \*{$prevstdout}] ;
   
   $this->{WORLD}->{SELECT}{PREVSTDERR} = $this->{PREVSTDERR} = *main::STDERR{IO} ;
   $this->{WORLD}->{SELECT}{PREVSUBWARN} = $this->{PREVSUBWARN} = $SIG{__WARN__} ;
@@ -116,7 +116,7 @@ sub DESTROY {
     }
   }
   
-  select($this->{PREVSTDOUT}) ;
+  &Safe::World::SELECT($this->{PREVSTDOUT}) ;
 
   $Safe_World_NOW = (ref($this->{PREVWORLD}) eq 'Safe::World') ? $this->{PREVWORLD} : undef ;
   

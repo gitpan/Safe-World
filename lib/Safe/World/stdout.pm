@@ -144,7 +144,7 @@ sub print_stdout {
   
   my $stdout = $this->{STDOUT} ;
   
-  if ( $this->{AUTOHEAD} ) {
+  if ( $this->{AUTOHEAD} && !$_[1] ) {
     my ($headers , $end) = $this->check_headsplitter($_[0]) ;
     if ($headers ne '' || $end ne '') {
       $this->{AUTOHEAD} = undef ;
@@ -154,19 +154,20 @@ sub print_stdout {
     }
   }
   else {
-    if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
-      #print main::STDOUT "**>> $this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS}\n" ;
-      $this->{HEADER_CLOSED} = 1 ;
-      $this->call_oncloseheaders ;
+    if ( !$_[1] ) {
+      if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
+        #print main::STDOUT "**>> $this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS}\n" ;
+        $this->{HEADER_CLOSED} = 1 ;
+        $this->call_oncloseheaders ;
+      }
+      else { $this->{HEADER_CLOSED} = 1 ;}
     }
-    
-    $this->{HEADER_CLOSED} = 1 ;
   
     if ( ref($stdout) eq 'SCALAR' ) { $$stdout .= $_[0] ;}
     elsif ( ref($stdout) eq 'CODE' ) {
-      my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+      my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
       &$stdout($Safe_World_NOW , $_[0]) ;
-      select($sel) if $sel ;
+      &Safe::World::SELECT($sel) if $sel ;
     }
     else { print $stdout $_[0] ;}
   }
@@ -198,9 +199,9 @@ sub print_headout {
 
   if ( ref($headout) eq 'SCALAR' ) { $$headout .= $_[0] ;}
   elsif ( ref($headout) eq 'CODE' ) {
-    my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+    my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
     &$headout($Safe_World_NOW , $_[0]) ;
-    select($sel) if $sel ;
+    &Safe::World::SELECT($sel) if $sel ;
   }
   else { print $headout $_[0] ;}
 
@@ -251,7 +252,7 @@ sub call_oncloseheaders {
   
   return if !$this->{ONCLOSEHEADERS} ;
   
-  my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+  my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
 
   my $autoflush = $this->{AUTO_FLUSH} ;
   
@@ -262,7 +263,7 @@ sub call_oncloseheaders {
   
   $this->{AUTO_FLUSH} = $autoflush ; 
 
-  select($sel) if $sel ;
+  &Safe::World::SELECT($sel) if $sel ;
 
   return 1 ;
 }
@@ -291,11 +292,11 @@ sub get_autoflush_value {
   my $sel = select ;
   
   my $reset ;
-  if ( $sel ne $this->{IO} && $sel ne 'main::STDOUT' ) { select($this->{IO}) ; $reset = 1 ;}
+  if ( $sel ne $this->{IO} && $sel ne 'main::STDOUT' ) { &Safe::World::SELECT($this->{IO}) ; $reset = 1 ;}
   
   my $val = $| ;
   
-  if ($reset) { select($sel) ;}
+  if ($reset) { &Safe::World::SELECT($sel) ;}
   
   return $val ;
 }

@@ -12,44 +12,21 @@
 
 package Safe::World ;
 
-use Safe::World::Compartment ;
-use Safe::World::ScanPack ;
-
-require Safe::World::select ; ## To be loaded after declare Safe::World scope.
-use Safe::World::stdout ;
-use Safe::World::stdoutsimple ;
-use Safe::World::stderr ;
-
-use strict qw(vars);
-
-use vars qw($VERSION @ISA) ;
-$VERSION = '0.08' ;
-
-##########
-# SCOPES #
-##########
-
-  use Safe::World::Scope ;
-
-  my $SCOPE_Safe_World_stdout = new Safe::World::Scope('Safe::World::stdout') ;
-  my $SCOPE_Safe_World_Compartment = new Safe::World::Scope('Safe::World::Compartment') ;
-  my $SCOPE_Safe_World_select = new Safe::World::Scope('Safe::World::select') ;
-  my $SCOPE_Safe_World_ScanPack = new Safe::World::Scope('Safe::World::ScanPack') ;
-  
-  my $Safe_World_stdout_headsplitter_html = \&Safe::World::stdout::headsplitter_html ;
-
 ########
 # VARS #
 ########
 
   use vars qw($NOW $EVALX) ;
 
-  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC , %WORLDS_LINKS , $IGNORE_EXIT) ;
+  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC , %WORLDS_LINKS , $IGNORE_EXIT , $SELECT_STDOUT_FIX , $UNIVERSAL_ISA) ;
   
   my $COMPARTMENT_NAME = 'SAFEWORLD' ;
   my $COMPARTMENT_NAME_CACHE = 'SAFEWORLD_CACHE_' ;
   
   my @DENY_OPS = qw(chroot syscall exit dump fork lock threadsv) ;
+  
+  my $MAIN_STDOUT = \*main::STDOUT ;
+  my $MAIN_STASH = *{'main::'}{HASH} ;
   
   ########
   # KEYS #
@@ -117,13 +94,121 @@ sub EXIT {
   else { CORE::exit(@_) ;}
 }
 
+##########
+# SELECT #
+##########
+
+sub SELECT {
+  if ( @_ > 1 ) {
+    return CORE::select($_[0],$_[1],$_[2],$_[3]) ;
+  }
+
+  my ( $io ) = @_ ;
+  
+  ##open (LOG,">>F:/projects/HPL7/DEV/apps/safeworld-$$.tmp") ;
+
+  my $outside = ($MAIN_STASH == *{"main::"}{HASH}) ? 1 : undef ;
+
+  my $root = $NOW->{ROOT} if ref $NOW ;
+
+  my ($prev_sel , $io_ref) ;
+  if ( ref($io) eq 'ARRAY') { ($io , $io_ref) = @{$io} ;}
+  
+  if ( ref($io) ) { ; }
+  elsif ( $io =~ /^(?:main::)*(?:STDOUT|stdout)$/s ) {
+    $io = $outside ? 'main::STDOUT' : "$root\::STDOUT" ;
+    $prev_sel = $io ;
+  }
+  elsif ( $io =~ /^(?:(?:main|(SAFEWORLD(?:_CACHE_)?\d+))::)*(?:STDOUT|stdout)$/s ) {
+    my $pack = $1 || 'main' ;
+    $io = "$pack\::STDOUT" ;
+    $prev_sel = $io ;
+  }
+  elsif ( $io ne '' && $io !~ /::/ && $io !~ /^(?:STDOUT|STDERR|STDIN)$/ ) {
+    my $caller = caller ;
+    $io = "$caller\::$io" ;
+  }
+  
+  my $sel = $io ne '' ? CORE::select($io_ref||$io) : CORE::select() ;
+  my $sel0 = $sel ;
+  
+  if ( $sel =~ /^(?:(?:main|(SAFEWORLD(?:_CACHE_)?\d+))::)*(?:STDOUT|stdout)$/s ) {
+    my $pack = $1 || 'main' ;
+    $sel = "$pack\::STDOUT" ;
+    if ( $sel eq 'main::STDOUT' && $SELECT_STDOUT_FIX ) { $sel = $SELECT_STDOUT_FIX ;}
+  }
+
+  $SELECT_STDOUT_FIX = $prev_sel if $io ne '' ;
+  
+  ##my @call = caller ;
+  ##print LOG "$outside>> $sel # $io { $sel0 # $_[0] } <<@call>>\n" ;
+  ##close(LOG) ;
+  
+  return $sel ;
+}
+
+#################
+# UNIVERSAL_ISA #
+#################
+
+sub UNIVERSAL_ISA {
+  my $ref = shift ;
+  my $class = shift ;
+  
+  my $outside = ($MAIN_STASH == *{"main::"}{HASH}) ? 1 : undef ;
+  my $root = $NOW->{ROOT} if ref $NOW ;
+  
+  if ( !$outside ) {
+    my $class1 = "$root\::$class" ;
+    my ($class2) = ( ref($ref) =~ /^(?:(?:main|(SAFEWORLD(?:_CACHE_)?\d+))::)*.*$/s );
+    $class2 = "$class2\::$class" if $class2 ;
+    return &$UNIVERSAL_ISA($ref , $class) || &$UNIVERSAL_ISA($ref , $class1) || ( $class2 ? &$UNIVERSAL_ISA($ref , $class2) : undef ) ;
+  }
+  else {
+    return &$UNIVERSAL_ISA($ref , $class) ;
+  }
+}
+
 #########
 # BEGIN #
 #########
 
 sub BEGIN {
   *CORE::GLOBAL::exit = \&EXIT ;
+  *CORE::GLOBAL::select = \&SELECT ; ## Fix different behavior of STDOUT select() inside Safe compartments on Perl-5.6x and Perl-5.8x.
+  $UNIVERSAL_ISA = \&UNIVERSAL::isa ;
+  *UNIVERSAL::isa = \&UNIVERSAL_ISA ;
 }
+
+############
+# REQUIRES #
+############
+
+use Safe::World::Compartment ;
+use Safe::World::ScanPack ;
+
+require Safe::World::select ; ## To be loaded after declare Safe::World scope.
+use Safe::World::stdout ;
+use Safe::World::stdoutsimple ;
+use Safe::World::stderr ;
+
+use strict qw(vars);
+
+use vars qw($VERSION @ISA) ;
+$VERSION = '0.09' ;
+
+##########
+# SCOPES #
+##########
+
+  use Safe::World::Scope ;
+
+  my $SCOPE_Safe_World_stdout = new Safe::World::Scope('Safe::World::stdout') ;
+  my $SCOPE_Safe_World_Compartment = new Safe::World::Scope('Safe::World::Compartment') ;
+  my $SCOPE_Safe_World_select = new Safe::World::Scope('Safe::World::select') ;
+  my $SCOPE_Safe_World_ScanPack = new Safe::World::Scope('Safe::World::ScanPack') ;
+  
+  my $Safe_World_stdout_headsplitter_html = \&Safe::World::stdout::headsplitter_html ;
 
 #########
 # ALIAS #
@@ -1058,7 +1143,7 @@ sub use_shared {
     if ( $INC{$pm} ) { return "Module $module already cached!" ;}
     
     my %inc_now = %INC ;
-    
+
     $this->eval_no_warn("require $module") ;
     
     if ( $@ ) {
@@ -2038,25 +2123,29 @@ Unlink all the worlds linked to this.
 
 Deny the listed operators from being used when compiling code in the compartment (other operators may still be permitted).
 
-I<** See L<Opcode>.>
+Example of use:
+
+  $world->deny_only( qw(chroot syscall exit dump fork lock threadsv) ) ;
+
+I<** See L<Opcode> for the OP list.>
 
 =head2 op_deny_only (OP, ...)
 
 Deny only the listed operators from being used when compiling code in the compartment (all other operators will be permitted).
 
-I<** See L<Opcode>.>
+I<** See L<Opcode> for the OP list.>
 
 =head2 op_permit (OP, ...)
 
 Permit the listed operators to be used when compiling code in the compartment (in addition to any operators already permitted).
 
-I<** See L<Opcode>.>
+I<** See L<Opcode> for the OP list.>
 
 =head2 op_permit_only (OP, ...)
 
 Permit only the listed operators to be used when compiling code in the compartment (no other operators are permitted).
 
-I<** See L<Opcode>.>
+I<** See L<Opcode> for the OP list.>
 
 =head2 print (STRING)
 
@@ -2196,13 +2285,13 @@ Set the value of a varaible inside the World:
     
     $world->set('$objectx' , $objecty , 1) ;    
 
-=head2 set_sharedpack (PACKAGE)
+=head2 set_sharedpack (@PACKAGE)
 
 Set a package inside a world SHARED, soo, when this World is linked to another this package is imported.
 
 ** See argument I<sharepack> at I<new()>.
 
-=head2 unset_sharedpack (PACKAGE)
+=head2 unset_sharedpack (@PACKAGE)
 
 Unset a SHARED package.
 
@@ -2276,7 +2365,7 @@ To make a cache system for the Perl Modules you should use the method I<use_shar
   ## Cache this perl module:
   $world_cache->use_shared('Data::Dumper') ;
   
-  ## Run 2 Worlds using Data::Dumper cached:
+  ## Run 3 Worlds using Data::Dumper cached:
   for(1..3) {
     my ( $stdout , $stderr ) ;
     my $world = Safe::World->new(
