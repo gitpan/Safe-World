@@ -195,7 +195,7 @@ use Safe::World::stderr ;
 use strict qw(vars);
 
 use vars qw($VERSION @ISA) ;
-$VERSION = '0.09' ;
+$VERSION = '0.10' ;
 
 ##########
 # SCOPES #
@@ -991,6 +991,8 @@ sub unshare_vars {
     $name =~ s/^{'(\S+)'}$/$1/ ;
     $name =~ s/^main::// ;
     
+    next if $this->{LINK_PACK_USED}{$name} ;
+    
     if    ($var_tp eq '$') { *{$pack.'::'.$name} = \$NULL ;}
     elsif ($var_tp eq '@') { *{$pack.'::'.$name} = \@NULL ;}
     elsif ($var_tp eq '%') { *{$pack.'::'.$name} = \%NULL ;}
@@ -1017,12 +1019,23 @@ sub link_pack {
   
   my $pack_alise = $pack ;
   $pack_alise =~ s/^(?:$COMPARTMENT_NAME|$COMPARTMENT_NAME_CACHE)\d+::// ;
+  
+  my @packs = scanpacks( "$this->{ROOT}::$pack_alise" ) ;
+  
+  foreach my $packs_i ( reverse sort @packs ) {
+    next if $packs_i eq "$this->{ROOT}::$pack_alise" ;
+    my $pack_link = $packs_i ;
+    $pack_link =~ s/^(?:$COMPARTMENT_NAME|$COMPARTMENT_NAME_CACHE)\d+::(?:$pack_alise:*)?// ;
+    $pack_link = "$pack\::$pack_link" ;
+    *{"$packs_i\::"} = *{"$pack_link\::"} ;
+  }
 
   *{"$this->{ROOT}\::$pack_alise\::"} = *{"$pack\::"} ;
   
   $this->{LINKED_PACKS}{$pack_alise} = 1 ;
   
-  $this->{LINK_PACK_USED} = 1 ;
+  $this->{LINK_PACK_USED}{_} = 1 ;
+  $this->{LINK_PACK_USED}{INC} = 1 ;
   
   return 1 ;
 }
@@ -1142,6 +1155,8 @@ sub use_shared {
   {
     if ( $INC{$pm} ) { return "Module $module already cached!" ;}
     
+    my %packs_prev = map { $_ => 1 } ( scanpacks( $this->{ROOT} ) ) ;
+    
     my %inc_now = %INC ;
 
     $this->eval_no_warn("require $module") ;
@@ -1151,6 +1166,29 @@ sub use_shared {
     }
     else {
       foreach my $Key ( keys %INC ) { $new_incs{$Key} = $INC{$Key} if !$inc_now{$Key} && ($Key =~ /^\w.*?\.pm$/) ;}
+      
+      my @packs_now = scanpacks( $this->{ROOT} ) ;
+
+      foreach my $packs_now_i ( @packs_now ) {
+        next if $packs_prev{$packs_now_i} ;
+        
+        my $pm = $packs_now_i ;
+        $pm =~ s/^\Q$this->{ROOT}\E::// ;
+        $pm =~ s/::/\//gs ; $pm .= '.pm' ;
+        
+        next if $new_incs{$pm} ;
+        
+        my $table = *{"$packs_now_i\::"}{HASH} ;
+        next if !%$table ;
+        
+        my $has_non_pack  ;
+        foreach my $Key (sort keys %$table ) {
+          if ( $Key !~ /::$/ ) { $has_non_pack = $Key ; last ;}
+        }
+        next if !$has_non_pack ;
+        
+        $new_incs{$pm} = '#not_from_file#' ;
+      }
     }
   }
   
@@ -1159,7 +1197,7 @@ sub use_shared {
   if ( %new_incs ) {
     my (%base_set , @set_shared) ;
     foreach my $Key ( sort keys %new_incs ) {
-      $inc{$Key} = '#shared#' ;
+      $inc{$Key} = '#shared#' if $new_incs{$Key} ne '#not_from_file#' ;
       $this->{USE_SHARED_INC}{$Key} = 1 ;
         
       my $module = $Key ;
@@ -1184,8 +1222,6 @@ sub use_shared {
     
     $this->set_sharedpack(@set_shared) ;
   }
-  
-
   
   return( \@link_pack , \%inc ) ;
 }
@@ -1307,13 +1343,16 @@ sub unlink_all_worlds {
   my $this = shift ;
   if ( $this->{INSIDE} || !$WORLDS_LINKS{$this} ) { return ;}
   
+  my @unlink_packs ;
+  
   foreach my $Key ( keys %{ $WORLDS_LINKS{$this} } ) {
+    push(@unlink_packs , $WORLDS_LINKS{$this}{$Key}->{ROOT} ) ;
     $this->unlink_world( $WORLDS_LINKS{$this}{$Key} ) ;
   }
   
   delete $WORLDS_LINKS{$this} ;
   
-  return 1 ;
+  return @unlink_packs ;
 }
 
 #############
@@ -1652,8 +1691,8 @@ sub undef_pack {
   my ($fullname) ;
   foreach my $symb ( keys %$package ) {
     $fullname = "$packname$symb" ;
-    if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ && $symb !~ /^[1-9\.]/ && (!$link_pack_used || ($link_pack_used && $symb ne '_' )) ) {
-      #print main::STDOUT "undef>> $packname>> $symb >> $fullname\n" ;
+    if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ && $symb !~ /^[1-9\.]/ && (!$link_pack_used || !$link_pack_used->{$symb}) ) {
+      ##print main::STDOUT "undef>> $packname>> $symb >> $fullname\n" ;
       
       eval {
         if (defined &$fullname) {

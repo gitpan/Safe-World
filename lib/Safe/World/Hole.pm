@@ -1,41 +1,78 @@
-# Safe::Hole/0.08 was copied to Safe::World::Hole to keep compatiblity,
-# since Safe::Hole/0.09 breaks behavior of *INC for Safe::World.
-#
-# Do not use this directly. For direct use see Safe::Hole
-#
+#############################################################################
+## Name:        Hole.pm
+## Purpose:     Safe::World::Hole - Front end for Safe::Hole
+## Author:      Graciliano M. P.
+## Modified by:
+## Created:     23/01/2004
+## RCS-ID:      
+## Copyright:   (c) 2004 Graciliano M. P.
+## Licence:     This program is free software; you can redistribute it and/or
+##              modify it under the same terms as Perl itself
+#############################################################################
 
 package Safe::World::Hole ;
 
-require 5.005 ;
+use vars qw($VERSION @ISA) ;
+$VERSION = '0.09';
 
-use strict;
-use vars qw($VERSION @ISA);
-$VERSION = '0.08';
+@ISA = qw(Safe::Hole) ;
 
-{ package Safe::World ;
-require DynaLoader ;
-@ISA = qw(DynaLoader);
-bootstrap Safe::World $Safe::World::VERSION ;
-}
+###########
+# REQUIRE #
+###########
 
-sub new {
-	my($class, $package) = @_;
-	my $self = {};
-	$self->{PACKAGE} = $package || 'main';
-	no strict 'refs';
-	$self->{STASH} = \%{$self->{PACKAGE} . '::'};
-	bless $self, $class;
-}
+use Safe::Hole ;
+
+##########
+# SCOPES #
+##########
+
+my $Safe_Hole_call = \&Safe::Hole::call ;
+
+########
+# CALL #
+########
 
 sub call {
-	my($self, $coderef, @args) = @_;
-	return Safe::World::_hole_call_sv($self->{STASH}, $coderef, \@args);
+  my $this = shift ;
+  if ( $Safe::Hole::VERSION == 0.09 ) { return $this->call_09_fix(@_) ;}
+  else {
+    &$Safe_Hole_call($this , @_) ; ## Can't use $this->SUPER::call(), since we won't find Safe::Hole::call in the scope!
+  }
 }
 
-sub root {
-	my $self = shift;
-	$self->{PACKAGE};
+###############
+# CALL_09_FIX #
+###############
+
+sub call_09_fix {
+  my $this = shift ;
+  my $coderef = shift ;
+  my @args = @_ ;
+  
+  my (@r,$did_not_die) ;
+  my $wantarray = wantarray ;
+  
+  package Safe::Hole::User ;
+  
+  my $inner_call = sub {
+                     eval {
+                       @_ = @args;
+                       if ( $wantarray ) { @r = &$coderef ;}
+                       else { @r = scalar &$coderef ;}
+                       $did_not_die = 1 ;
+                     }
+                   };
+  
+  Safe::Hole::_hole_call_sv($this->{STASH},undef, $inner_call) ;
+  
+  die $@ unless $did_not_die ;
+  return $wantarray ? @r : $r[0] ;
 }
+
+#######
+# END #
+#######
 
 1;
 
@@ -43,22 +80,15 @@ __END__
 
 =head1 NAME
 
-Clone of Safe::Hole to keep compatiblity, since Safe::Hole/0.09+ breaks behavior of *INC for Safe::World.
+Front end interface to Safe::Hole/0.08 , Safe::Hole/0.09 and Safe::Hole/0.10+
 
-=head1 USE
+=head1 NOTE
 
-Do not use this directly. See L<Safe::Hole>.
+This module is here just to handle and fix Safe::Hole/0.09.
+Other versions of Safe::Hole wil work fine.
 
-=head1 ORIGINAL VERSION
+B<Do not use this directly. See L<Safe::Hole>.>
 
-Safe::Hole/0.08
+=cut
 
-=head1 ORIGINAL AUTHOR
-
-Sey Nakajima <nakajima@netstock.co.jp>, Brian McCauley <nobull@cpan.org>
-
-=head1 COPYRIGHT
-
-This program is free software; you can redistribute it and/or
-modify it under the same terms as Perl itself.
 

@@ -1,8 +1,14 @@
 Revision history for Perl extension Safe::World.
 
 
+0.10  23 Jan 2004
+      - Safe::Hole is back as a dependences. Safe::Hole 0.10+ world well.
+      - Bug fixes for global variables of cache compartments and persistent code.
+
+
 0.09  16 Jan 2004
-      - Fixed bug with select() overwrited, for slection of handlers from a package (forgot to keep the caller base).
+      - Fixed bug with select() overwrited, for slection of handlers from a package
+        (forgot to keep the caller base).
       - Added Safe::World::Hole, to keep compatiblity, since Safe::World/0.09 breaks *INC behavior for Safe::World.
       - Removed dependency of Safe::Hole
       - Added wrapper for UNIVERSAL::isa() to handle rigth the package names.

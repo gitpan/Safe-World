@@ -2,7 +2,6 @@ Changes
 MANIFEST
 Makefile.PL
 README
-World.xs
 test.pl
 test/required.pm
 test/shared.pm
