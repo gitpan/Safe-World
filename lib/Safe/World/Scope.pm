@@ -15,9 +15,9 @@ package Safe::World::Scope ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.01' ;
+$VERSION = '0.02' ;
 
-my ($HOLE) ;
+my ($HOLE,%HOOK_IDS) ;
 
 #######
 # NEW # package
@@ -58,12 +58,6 @@ sub new_hook {
   
   $this->{PACKAGE} = $class ;
   
-  my $hook_sub = "$class\::__SAFEWORLD_HOOK__" ;
-  
-  if ( !defined &$hook_sub ) {
-    *{$hook_sub} = \&__SAFEWORLD_HOOK__ ;
-  }
-  
   my @table = &scanpack_table($class) ;
   
   foreach my $table_i ( @table ) {
@@ -78,6 +72,21 @@ sub new_hook {
       elsif ( $tp eq '&' )  { $this->{$tp}{$name} = \&$sub ;}      
     }
   }
+  
+  my $hook_sub = "$class\::__SAFEWORLD_HOOK__" ;
+  
+  if ( !defined &$hook_sub ) {
+    *{$hook_sub} = \&__SAFEWORLD_HOOK__ ;
+    
+    ## Overload DESTROY to skeep DESTROY of HOOKs.
+    if ( $this->{'&'}{DESTROY} ) {
+      my $dest_ref = \&{"$class\::DESTROY"} ;
+      *{"$class\::DESTROY"} = sub { return if $HOOK_IDS{"$_[0]"} ; &$dest_ref(@_) ;}
+    }
+    
+  }
+  
+  $HOOK_IDS{"$this"} = 1 ;
 
   return $this ;
 }
@@ -274,13 +283,13 @@ But let's say that foo() call some other package:
   
   sub foo {
     my $this = shift ;
-    my $dump = Data::Dumper($this) ;
+    my $dump = Data::Dumper::Dumper($this) ;
   }
 
-B<Now foo() call Data::Dumper(), but the package Data::Dumper exists only outside of the World and is not shared!>
+B<Now foo() call Data::Dumper::Dumper(), but the package Data::Dumper exists only outside of the World and is not shared!>
 
-Here we will get an error, since foo can't have access to the scope of Data::, since it will try to get the sub inside
-the World, at SAFEWORLD1::Data::Dumper, and not at main::Data::Dumper (where it really exists).
+Here we will get an error, since foo can't have access to the scope of Data::Dumper::, since it will try to get the sub inside
+the World, at SAFEWORLD1::Data::Dumper::Dumper, and not at main::Data::Dumper::Dumper (where it really exists).
 
 Soo, to make the object work, you can design it to access outside scopes through a I<Scope> object:
 
@@ -290,11 +299,11 @@ Soo, to make the object work, you can design it to access outside scopes through
   
   use Data::Dumper qw() ;
 
-  my $SCOPE_Data = new Safe::World::Scope('Data') ;
+  my $SCOPE_Data_Dumper = new Safe::World::Scope('Data::Dumper') ;
   
   sub foo {
     my $this = shift ;
-    my $dump = $SCOPE_Data->call('Dumper',$this) ;
+    my $dump = $SCOPE_Data_Dumper->call('Dumper',$this) ;
   }
 
 Now with this design you can use $object inside the World without share any other package, what make it much more safer.

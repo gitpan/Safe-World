@@ -3,7 +3,7 @@
 ###use Data::Dumper ; print Dumper( $world ) ;
 
 use Test;
-BEGIN { plan tests => 53 } ;
+BEGIN { plan tests => 61 } ;
 
 use Safe::World ;
 
@@ -39,6 +39,48 @@ use warnings qw'all' ;
   ok($stdout , "Test1 <BAZ = BRAS><FOO = bar>") ;
   ok($stderr , "ERROR!\nAlert!!! at (eval x) line 4.\n") ;
   
+}
+#########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+  
+  $world->eval(q`
+     $var = 'abcd' ;
+     $var{k1} = 'v1' ;
+  `);
+  
+  my $val = $world->get('$var') ;
+  ok($val,'abcd');
+  
+  $val = $world->get('$var{k1}') ;
+  ok($val,'v1');
+  
+  my $var_ref = $world->get_ref('$var') ;
+  ok(ref($var_ref) , 'SCALAR');
+  
+  ${$var_ref} .= 'efgh' ;
+  
+  $val = $world->get('$var') ;
+  ok($val,'abcdefgh');
+  
+  my $var_ref_copy = $world->get_ref_copy('$var') ;
+  ok(ref($var_ref_copy) , 'SCALAR');
+  
+  ${$var_ref_copy} .= 'ijkl' ;
+  ok(${$var_ref_copy} ,'abcdefghijkl') ;
+    
+  $val = $world->get('$var') ;
+  ok($val,'abcdefgh');
+
+  ok($stderr , '') ;
+
 }
 #########################
 {
@@ -457,7 +499,7 @@ end!
   ok($stderr , "error!\nwarning!!! at (eval x) line 19.\n") ;
 }
 #########################
-if (0){
+{
 
   my ( $stdout , $stderr ) ;
 

@@ -70,7 +70,7 @@ sub new {
   
   if ( $this->{WORLD}->{TIESTDOUT}->{AUTO_FLUSH} ) { $| = 1 ;}
 
-  $this->{WORLD}->set('$SAFEWORLD', $this->{WORLD} , 1 ) ;
+  $this->{WORLD}->set('$SAFEWORLD', $this->{WORLD} , 1 ) if !$this->{WORLD}->{NO_SET_SAFEWORLD} ;
 
   if ( $this->{WORLD}->{ONSELECT} ) {
     my $sub = $this->{WORLD}->{ONSELECT} ;
@@ -97,7 +97,7 @@ sub DESTROY {
   
   %{$this->{WORLD}->{SELECT}} = () ;
   
-  $this->{WORLD}->set('$SAFEWORLD', \undef) ;
+  $this->{WORLD}->set('$SAFEWORLD', \undef) if !$this->{WORLD}->{NO_SET_SAFEWORLD} ;
   
   if ( $this->{WORLD}->{ONUNSELECT} ) {
     my $sub = $this->{WORLD}->{ONUNSELECT} ;
@@ -168,7 +168,6 @@ sub out_set {
 ################
 
 sub print_stderr {
-#  print main::STDOUT "warn>> @_ <<[$@]\n" ;
   $Safe_World_NOW->print_stderr(@_) ;  return ;
 }
 

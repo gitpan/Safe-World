@@ -1,6 +1,6 @@
 #############################################################################
 ## Name:        Compartment.pm
-## Purpose:     Safe::World::Compartment
+## Purpose:     Safe::World::Compartment -> Based in the Safe module.
 ## Author:      Graciliano M. P.
 ## Modified by:
 ## Created:     04/12/2003

@@ -23,7 +23,7 @@ use Safe::World::stderr ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.05' ;
+$VERSION = '0.06' ;
 
 ##########
 # SCOPES #
@@ -78,6 +78,7 @@ $VERSION = '0.05' ;
   ## WORLD_SHARED    ## if this world is shared and the name of the holder.
   ## SELECT{}        ## Safe::World::select keys.
 
+  ## NO_SET_SAFEWORLD  ## Do not set the variable $SAFEWORLD inside the compartment.
   ## NO_CLEAN        ## If will not clean the pack.
 
   ## DESTROIED       ## if DESTROY() was alredy called.
@@ -108,7 +109,7 @@ $VERSION = '0.05' ;
 sub EXIT {
   if ( $NOW && ref($NOW) eq 'Safe::World' ) {
     my $exit ;
-    if ( $NOW->{ONEXIT} ) {
+    if ( $NOW->{ONEXIT} && !$NOW->{EXIT} ) {
       my $sel = select( $NOW->{SELECT}{PREVSTDOUT} ) if $NOW->{SELECT}{PREVSTDOUT} ;
         my $sub = $NOW->{ONEXIT} ;
         $exit = &$sub($NOW , @_) ;
@@ -145,7 +146,7 @@ sub headers {
 sub stdout_data { return $_[0]->{TIESTDOUT}->stdout_data ; }
 
 #######
-# NEW # root , stdout , stdin , stderr , env , headout , headsplitter , autohead , &on_closeheaders , &on_exit , &on_select , &on_unselect , sharepack , flush , no_clean
+# NEW # root , stdout , stdin , stderr , env , headout , headsplitter , autohead , &on_closeheaders , &on_exit , &on_select , &on_unselect , sharepack , flush , no_clean , no_set_safeworld
 #######
 
 sub new {
@@ -198,12 +199,26 @@ sub new {
   $this->{SHAREDPACK} = $args{sharepack} ;
   if ( $this->{SHAREDPACK} && ref($this->{SHAREDPACK}) ne 'ARRAY' ) { $this->{SHAREDPACK} = [$this->{SHAREDPACK}] ;}
   
+  if ( $this->{SHAREDPACK} ) {
+    foreach my $packs_i ( @{ $this->{SHAREDPACK} } ) {
+      $packs_i =~ s/[^\w:\.]//gs ;
+      $packs_i =~ s/[:\.]+/::/ ;
+      $packs_i =~ s/^(?:main)?::// ;
+      $packs_i =~ s/::$// ;
+      my $pm = $packs_i ;
+      $pm =~ s/::/\//g ;
+      $pm .= '.pm' ;
+      $this->{SHAREDPACK_PM}{$packs_i} = $pm ;
+    }
+  }
+  
   $this->{ENV} = $args{env} || $args{ENV} ;
   if ( ref($this->{ENV}) ne 'HASH') { $this->{ENV} = undef ;}
 
   my $packname = $args{root} || $COMPARTMENT_NAME . ++$COMPARTMENT_X ;
   $this->{ROOT} = $packname ;
-  
+ 
+  $this->{NO_SET_SAFEWORLD} = 1 if $args{no_set_safeworld} ;
   $this->{NO_CLEAN} = 1 if $args{no_clean} ;
   
   $this->{SAFE} = $SCOPE_Safe_World_Compartment->NEW($packname) ; # Safe::World::Compartment->new($packname) ;
@@ -230,14 +245,14 @@ sub new {
   *{"$packname\::STDIN"}  = $this->{STDIN}  if $this->{STDIN} ;
   
   ###
-  
+    
   $this->link_pack('UNIVERSAL') ;
   $this->link_pack('attributes') ;
   $this->link_pack('DynaLoader') ;
   $this->link_pack('IO') ;
   
-  $this->link_pack('Exporter') ;
-  $this->link_pack('warnings') ;
+#  $this->link_pack('Exporter') ;
+#  $this->link_pack('warnings') ;
   $this->link_pack('CORE') ;  
   
   $this->link_pack('<none>') ;  
@@ -250,7 +265,7 @@ sub new {
   '$@','$|','$_', '$!',
   #'$-', , '$/' ,'$!','$.' ,
   ]) ;
-
+  
   $this->select_static ;
 
   $this->set_vars(
@@ -266,10 +281,33 @@ sub new {
   $this->set('%INC',{}) ;
   
   $this->eval("no strict ;") ; ## just to load strict inside the compartment.
-  
   $this->unselect_static ;
 
   return $this ;
+}
+
+###########
+# OPCODES #
+###########
+
+sub op_deny {
+  my $this = shift ;
+  $this->{SAFE}->deny(@_);
+}
+
+sub op_deny_only {
+  my $this = shift ;
+  $this->{SAFE}->deny_only(@_);
+}
+
+sub op_permit {
+  my $this = shift ;
+  $this->{SAFE}->permit(@_);
+}
+
+sub op_permit_only {
+  my $this = shift ;
+  $this->{SAFE}->permit_only(@_);
 }
 
 ##############
@@ -324,6 +362,8 @@ sub reset {
     if ( ref($this->{ENV}) ne 'HASH') { $this->{ENV} = undef ;}  
   }
   
+  my $sel = $this->select_static ;
+  
   $this->set_vars(
   '%SIG' => \%SIG ,
   '$/' => $/ ,
@@ -349,6 +389,8 @@ sub reset {
   *{"$packname\::STDIN"}  = $this->{STDIN}  if $this->{STDIN} ;
   
   sync_evalx() ;
+  
+  $this->unselect_static if $sel ;
   
   return 1 ;
 }
@@ -450,12 +492,12 @@ sub eval {
     
     if ( wantarray ) {
       my @__HPL_ReT__ = eval("no strict;\@_ = () ; package main ; $_[1]") ;
-      $_[0]->warn($@ , 1) if $@ ;
+      $NOW->warn($@ , 1) if $@ ; ## $_[0] is undef by @_ = () ;
       return @__HPL_ReT__ ;
     }
     else {
       my $__HPL_ReT__ = eval("no strict;\@_ = () ; package main ; $_[1]") ;
-      $_[0]->warn($@ , 1) if $@ ;
+      $NOW->warn($@ , 1) if $@ ; ## $_[0] is undef by @_ = () ;
       return $__HPL_ReT__ ;
     }
   }
@@ -555,13 +597,44 @@ sub call {
 # GET #
 #######
 
-sub get { &eval ;}
+sub get {
+  my $this = shift ;
+  my $var = shift ;
+  
+  my $pack = $this->{ROOT} ;
+  
+  my ($var_tp,$var_name,$var_more) = ( $var =~ /^\s*([\$\@\%\*])([\w:]+)(.*)\s*$/s );
+  
+  if ( $var_more ) { $var_tp = '' ;}
+  
+  if    ($var_tp eq '$') { return ${$pack.'::'.$var_name} ;}
+  elsif ($var_tp eq '@') { return @{$pack.'::'.$var_name} ;}
+  elsif ($var_tp eq '%') { return %{$pack.'::'.$var_name} ;}
+  elsif ($var_tp eq '*') { return *{$pack.'::'.$var_name} ;}
+  else { return $this->eval($var) ;}
+
+  return ;
+}
 
 ############
 # GET_FROM #
 ############
 
-sub get_from { &eval($_[0] , "package $_[1] ;\n$_[2]") ;}
+sub get_from {
+  my $this = shift ;
+  my $pack = shift ;
+  my $var = shift ;
+  
+  $pack =~ s/[:\.]+/::/gs ;
+  return if $pack !~ /^\w+(?:::\w+)*(?:::)?$/s ;
+  
+  my ($var_tp,$var_name,$var_more) = ( $var =~ /^\s*([\$\@\%\*])([\w:]+)(.*)\s*$/s );
+  
+  if ( !$var_tp ) { return $this->eval("package $pack; $var") ;}
+  
+  my $varfull = "$var_tp$pack\::$var_name$var_more" ;
+  return $this->get($varfull) ;
+}
 
 ###########
 # GET_REF #
@@ -616,38 +689,38 @@ sub set {
   my $this = shift ;
   my ( $var , undef , $no_parse_ref) = @_ ;
   
-  if ( $no_parse_ref ) {
-    my $tmp = $_ ;
-    $_ = $_[1] ;
-    $this->eval("$var = \$_ ;") ;
-    $_ = $tmp ;
-  }
-  else {
-    my $val = (ref($_[1])) ? $_[1] : ( $_[1] eq '' ? \undef : \$_[1]) ;
-    my $tmp = $_ ;
-    
-    $_ = $val ;
-    my $ref = ref($val) ;
-    
-    if ( $ref eq 'SCALAR' || $ref eq 'REF' ) {
-      $this->eval("$var = \${\$_} ;") ;
-    }
-    elsif ( $ref eq 'ARRAY' ) {
-      $this->eval("$var = \@{\$_} ;") ;
-    }
-    elsif ( $ref eq 'HASH' ) {
-      $this->eval("$var = \%{\$_} ;") ;
-    }
-    elsif ( $ref eq 'GLOB' ) {
-      $this->eval("$var = \*{\$_} ;") ;
-    }
-    else {
-      $this->eval("$var = \$_ ;") ;
-    }
-    
-    $_ = $tmp ;
+  my $SAFE_WORLD_selected ;
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
   }
   
+  my $pack = $this->{ROOT} ;
+  
+  my ($var_tp,$var_name) = ( $var =~ /^([\$\@\%\*])(.*)/s );
+  
+  my $val = (ref($_[1])) ? $_[1] : ( $_[1] eq '' ? \undef : \$_[1]) ;
+  
+  if ($var_tp eq '$') {
+    if    (!$no_parse_ref && ref($val) eq 'SCALAR') { ${$pack.'::'.$var_name} = ${$val} ;}
+    else                                            { ${$pack.'::'.$var_name} = $val ;}
+  }
+  elsif ($var_tp eq '@') {
+    if    (!$no_parse_ref && ref($val) eq 'ARRAY') { @{$pack.'::'.$var_name} = @{$val} ;}
+    elsif (!$no_parse_ref && ref($val) eq 'HASH')  { @{$pack.'::'.$var_name} = %{$val} ;}
+    else                                           { @{$pack.'::'.$var_name} = $val ;}
+  }
+  elsif ($var_tp eq '%') {
+    if    (!$no_parse_ref && ref($val) eq 'HASH')  { %{$pack.'::'.$var_name} = %{$val} ;}
+    elsif (!$no_parse_ref && ref($val) eq 'ARRAY') { %{$pack.'::'.$var_name} = @{$val} ;}
+    else                                           { %{$pack.'::'.$var_name} = $val ;}
+  }
+  elsif ($var_tp eq '*') {
+    if    (ref($val) eq 'GLOB')  { *{$pack.'::'.$var_name} = $val ;}
+    else                         { *{$pack.'::'.$var_name} = \*{$val} ;}
+  }
+  else {
+    ++$EVALX ; eval("$var_tp$pack\::$var_name = $val ;") ;
+  }
 
   return ;
 }
@@ -692,7 +765,7 @@ sub set_vars {
       if    (ref($vars{$Key}) eq 'GLOB')  { *{$pack.'::'.$var} = $vars{$Key} ;}
       else                                { *{$pack.'::'.$var} = \*{$vars{$Key}} ;}
     }
-    else { ++$EVALX ; eval("$Key = \$vars{\$Key} ;") ;}
+    else { ++$EVALX ; eval("$var_tp$pack\::$var = \$vars{\$Key} ;") ;}
   }
   
   return 1 ;
@@ -796,8 +869,13 @@ sub unlink_pack {
 sub unlink_pack_all {
   my $this = shift ;
   if ( $this->{INSIDE} ) { return ;}
-  
+
   my $packname = $this->{ROOT} ;
+  
+  if ( $_[0] ) {
+    $this->{LINKED_PACKS}{$packname} = 1 ;
+    $this->{LINKED_PACKS}{main} = 1 ;
+  }
 
   foreach my $pack ( keys %{$this->{LINKED_PACKS}} ) {
     *{"$packname\::$pack\::"} = *{"$packname\::PACKNULL::"} ;
@@ -821,8 +899,19 @@ sub set_sharedpack {
   my %shared_pack = map { ("$_\::" => 1) } @shared_pack ;
   
   foreach my $packs_i ( @packs ) {
+    $packs_i =~ s/[^\w:\.]//gs ;
+    $packs_i =~ s/[:\.]+/::/ ;
+    $packs_i =~ s/^(?:main)?::// ;
+    $packs_i =~ s/::$// ;
+    
     next if ($shared_pack{$packs_i} || $packs_i eq '') ;
+    
     push(@{$this->{SHAREDPACK}} , $packs_i) ;
+
+    my $pm = $packs_i ;
+    $pm =~ s/::/\//g ;
+    $pm .= '.pm' ;
+    $this->{SHAREDPACK_PM}{$packs_i} = $pm ;
   }
   
   return 1 ;
@@ -840,7 +929,8 @@ sub unset_sharedpack {
   
   my @sets ;
   foreach my $shared_pack_i ( @{$this->{SHAREDPACK}} ) {
-    push(@sets , $shared_pack_i) unless $packs{$shared_pack_i} ;
+    if ( !$packs{$shared_pack_i} ) { push(@sets , $shared_pack_i) ;}
+    else { delete $this->{SHAREDPACK_PM}{$shared_pack_i} ;}
   }
   
   @{$this->{SHAREDPACK}} = @sets ;
@@ -863,8 +953,10 @@ sub link_world {
   my @shared_pack = @{$world->{SHAREDPACK}} ;
   my %shared_pack = map { ("$_\::" => 1) } @shared_pack ;
 
+  my $inc = \%{$this->{ROOT}.'::INC'} ;
   foreach my $shared_pack ( @shared_pack ) {
     $this->link_pack("$world_root\::$shared_pack") ;
+    $$inc{ $world->{SHAREDPACK_PM}{$shared_pack} } = '#shared#' ;
   }
   
   my $table = *{"$world_root\::"}{HASH} ;
@@ -901,10 +993,14 @@ sub unlink_world {
   my @shared_pack = @{$world->{SHAREDPACK}} ;
   my %shared_pack = map { ("$_\::" => 1) } @shared_pack ;
 
+  my $inc = \%{$this->{ROOT}.'::INC'} ;
+  my $pm ;
   foreach my $shared_pack ( @shared_pack ) {
     $this->unlink_pack("$world_root\::$shared_pack") ;
+    $pm = $world->{SHAREDPACK_PM}{$shared_pack} ;
+    delete $$inc{$pm} if $$inc{$pm} eq '#shared#' ;
   }
-
+  
   my $table = *{"$world_root\::"}{HASH} ;
   
   foreach my $Key ( keys %$table ) {
@@ -1164,15 +1260,13 @@ sub close {
 sub DESTROY {
   my $this = shift ;
   return if $this->{DESTROIED} ;
+  
   $this->{DESTROIED} = 1 ;
 
   $this->unlink_all_worlds ;
   $this->close ;
   
-  $this->{LINKED_PACKS}{$this->{ROOT}} = 1 ;
-  $this->{LINKED_PACKS}{main} = 1 ;
-  
-  $this->unlink_pack_all ;
+  $this->unlink_pack_all(1) ;
 
   $this->CLEAN ;
 }
@@ -1498,6 +1592,10 @@ If TRUE tell that STDOUT will be always flushed ( $| = 1 ).
 
 If TRUE tell that the compartment wont be cleaned when destroyed.
 
+=item no_set_safeworld (bool)
+
+If TRUE tell to not set the internal object $SAFEWORLD, that gives access to it self inside the compartment.
+
 =item autohead (bool)
 
 If TRUE tell that the STDOUT will handler automatically the handlers in the output, using I<headsplitter>.
@@ -1642,6 +1740,12 @@ Link some package to the world.
 
 Unlink a package.
 
+=head2 unlink_pack_all
+
+Unlink all the packages linked to this World.
+
+** You shouldn't call this by your self. This is only used by DESTROY().
+
 =head2 link_world (WORLD)
 
 Link the compartment of a world to another.
@@ -1655,6 +1759,30 @@ Unlink/disassemble a World from another.
 =head2 unlink_all_worlds
 
 Unlink all the worlds linked to this.
+
+=head2 op_deny (OP, ...)
+
+Deny the listed operators from being used when compiling code in the compartment (other operators may still be permitted).
+
+I<** See L<Opcode>.>
+
+=head2 op_deny_only (OP, ...)
+
+Deny only the listed operators from being used when compiling code in the compartment (all other operators will be permitted).
+
+I<** See L<Opcode>.>
+
+=head2 op_permit (OP, ...)
+
+Permit the listed operators to be used when compiling code in the compartment (in addition to any operators already permitted).
+
+I<** See L<Opcode>.>
+
+=head2 op_permit_only (OP, ...)
+
+Permit only the listed operators to be used when compiling code in the compartment (no other operators are permitted).
+
+I<** See L<Opcode>.>
 
 =head2 print (STRING)
 
@@ -1838,13 +1966,6 @@ The tiehandler of STDOUT.
 
 The tiehandler of STDERR.
 
-
-=head2 unlink_pack_all
-
-Unlink all the packages linked to this World.
-
-** You shouldn't call this by your self. This is only used by DESTROY().
-
 =head2 warn
 
 Send some I<warn> message to the world, that will be redirected to the STDERR of the World.
@@ -1852,7 +1973,7 @@ Send some I<warn> message to the world, that will be redirected to the STDERR of
 
 =head1 SEE ALSO
 
-L<HPL>, L<Safe>.
+L<Safe::World::Scope>, L<HPL>, L<Safe>, L<Opcode>.
 
 =head1 NOTES
 

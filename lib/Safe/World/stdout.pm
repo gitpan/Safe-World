@@ -31,8 +31,9 @@ $VERSION = '0.02' ;
 
 sub check_headsplitter {
   my $this = shift ;
+
   $this->{AUTOHEAD_DATA} .= shift ;
-  
+
   my $headsplitter = $this->{HEADSPLITTER} ;
 
   my ($headers , $end) ;
@@ -132,7 +133,7 @@ sub print_stdout {
     my ($headers , $end) = $this->check_headsplitter($_[0]) ;
     if ($headers ne '' || $end ne '') {
       $this->{AUTOHEAD} = undef ;
-      $this->print_headout($headers) if $headers ne '' ;
+      $this->print_headout($headers,1) if $headers ne '' ;
       $this->print($end) if $end ne '' ;
       return 1 ;
     }
@@ -170,6 +171,17 @@ sub print_headout {
   my $headout = $this->{HEADOUT} ;
 
   return $this->print_stdout($_[0]) if !$headout ;
+  
+  if ( !$_[1] && $this->{AUTOHEAD} ) {
+    my ($headers , $end) = $this->check_headsplitter($_[0]) ;
+    if ($headers ne '' || $end ne '') {
+      $this->{AUTOHEAD} = undef ;
+      $this->print_headout($headers,1) if $headers ne '' ;
+      $this->print($end) if $end ne '' ;
+      return 1 ;
+    }
+    return ;
+  }
 
   if ( ref($headout) eq 'SCALAR' ) { $$headout .= $_[0] ;}
   elsif ( ref($headout) eq 'CODE' ) {
@@ -195,7 +207,7 @@ sub close_headers {
   if ( $this->{AUTOHEAD_DATA} ne '' ) {
     my ($headers , $end) = $this->check_headsplitter() ;
     if ($headers ne '' || $end ne '') {
-      $this->print_headout($headers) if $headers ne '' ;
+      $this->print_headout($headers,1) if $headers ne '' ;
       $this->print($end) if $end ne '' ;
     }
     else {

@@ -1,8 +1,18 @@
 Revision history for Perl extension Safe::World.
 
+0.06  19 Dec 2003
+      - Added method op_deny, op_deny_only, op_permit, op_permit_only.
+      - Fixed minor bug on eval(), when called from inside.
+      - Fixed DESTROY for HOOK of Safe::World::Scope.
+      - Added some internal select_static() calls for optimization.
+      - Fixed autohead for print_header().
+
+
 0.05  16 Dec 2003
+      - Added method op_deny, op_deny_only, op_permit, op_permit_only.
       - Added methods reset_output(), unlink_all_worlds().
       - Fixed bug on destroy.
+      - Fixed minor bug on eval(), when called from inside.
       - New module Safe::World::Scope, for objects that works inside the World without share packages.
       - Added dependece to Safe::Hole/0.08, due Safe::World::Scope.
       - All the Safe::World* packages reviseds to use Safe::World::Scope access.
