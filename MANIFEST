@@ -3,7 +3,9 @@ MANIFEST
 Makefile.PL
 README
 test.pl
+test/required.pm
 test/shared.pm
+test/useshared.pm
 lib/Safe/World.pm
 lib/Safe/World/Compartment.pm
 lib/Safe/World/ScanPack.pm

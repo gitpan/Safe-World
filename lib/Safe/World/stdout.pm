@@ -110,8 +110,22 @@ sub headers {
 ###############
 
 sub stdout_data {
-  my $stdout = (ref($_[0]->{STDOUT}) eq 'SCALAR') ? ${ $_[0]->{STDOUT} } : '' ;
-  return $stdout ;
+  if ( ref($_[0]->{STDOUT}) eq 'SCALAR' ) {
+    if ($#_ >= 1) { ${$_[0]->{STDOUT}} = $_[1] ;}
+    my $stdout = ${ $_[0]->{STDOUT} } ;
+    return $stdout ;
+  }
+  else { return '' ;}
+}
+
+###############
+# BUFFER_DATA #
+###############
+
+sub buffer_data {
+  if ($#_ >= 1) { $_[0]->{BUFFER} = $_[1] ;}
+  my $buf = $_[0]->{BUFFER} ;
+  return $buf ;
 }
 
 #########
@@ -125,6 +139,7 @@ sub print { &PRINT ;}
 ################
 
 sub print_stdout {
+  #print main::STDOUT "std>> $| [[$_[1]]] [[$_[0]->{BUFFER}]]\n" ;
   my $this = shift ; return 1 if $_[0] eq '' ;
   
   my $stdout = $this->{STDOUT} ;
@@ -140,11 +155,9 @@ sub print_stdout {
   }
   else {
     if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
+      #print main::STDOUT "**>> $this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS}\n" ;
       $this->{HEADER_CLOSED} = 1 ;
-      my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
-      my $oncloseheaders = $this->{ONCLOSEHEADERS} ;
-      &$oncloseheaders( $Safe_World_NOW , $this->headers ) ;
-      select($sel) if $sel ;
+      $this->call_oncloseheaders ;
     }
     
     $this->{HEADER_CLOSED} = 1 ;
@@ -200,7 +213,11 @@ sub print_headout {
 
 sub close_headers {
   my $this = shift ;
-  return if !$this->{AUTOHEAD} ;
+  
+  ##print main::STDOUT ">> $this->{AUTOHEAD} && $this->{HEADER_CLOSED} [[$this->{AUTOHEAD_DATA}]] [[$this->{BUFFER}]]\n" ;
+
+  ##return if !$this->{AUTOHEAD} ;
+  return if (!$this->{AUTOHEAD} && $this->{HEADER_CLOSED}) || $this->{BUFFER} ne '' ;
   
   $this->{AUTOHEAD} = undef ;
 
@@ -217,14 +234,36 @@ sub close_headers {
   
   if ( !$this->{HEADER_CLOSED} && $this->{ONCLOSEHEADERS} ) {
     $this->{HEADER_CLOSED} = 1 ;
-    my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
-    my $oncloseheaders = $this->{ONCLOSEHEADERS} ;
-    &$oncloseheaders( $Safe_World_NOW , $this->headers ) ;
-    select($sel) if $sel ;
+    $this->call_oncloseheaders ;
   }
 
   $this->{HEADER_CLOSED} = 1 ;
   
+  return 1 ;
+}
+
+#######################
+# CALL_ONCLOSEHEADERS #
+#######################
+
+sub call_oncloseheaders {
+  my $this = shift ;
+  
+  return if !$this->{ONCLOSEHEADERS} ;
+  
+  my $sel = select( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+
+  my $autoflush = $this->{AUTO_FLUSH} ;
+  
+  $this->{AUTO_FLUSH} = 1 ;
+
+  my $oncloseheaders = $this->{ONCLOSEHEADERS} ;
+  &$oncloseheaders( $Safe_World_NOW , $this->headers ) ;
+  
+  $this->{AUTO_FLUSH} = $autoflush ; 
+
+  select($sel) if $sel ;
+
   return 1 ;
 }
 
@@ -243,6 +282,24 @@ sub flush {
   return ;
 }
 
+#######################
+# GET_AUTOFLUSH_VALUE #
+#######################
+
+sub get_autoflush_value {
+  my $this = shift ;
+  my $sel = select ;
+  
+  my $reset ;
+  if ( $sel ne $this->{IO} && $sel ne 'main::STDOUT' ) { select($this->{IO}) ; $reset = 1 ;}
+  
+  my $val = $| ;
+  
+  if ($reset) { select($sel) ;}
+  
+  return $val ;
+}
+
 #############
 # TIEHANDLE #
 #############
@@ -259,6 +316,7 @@ sub TIEHANDLE {
   HEADSPLITTER => $headsplitter ,
   ONCLOSEHEADERS => $oncloseheaders ,
   AUTO_FLUSH => $flush ,
+  IO => "$root\::STDOUT" ,
   } ;
 
   bless($this , $class) ;
@@ -271,10 +329,16 @@ sub PRINT {
   if ( $this->{REDIRECT} ) {
     ${$this->{REDIRECT}} .= join("", (@_[0..$#_])) ;
   }
-  elsif ( !$| && !$this->{AUTO_FLUSH} && !$this->{AUTOHEAD} ) { $this->{BUFFER} .= join("", (@_[0..$#_])) ;}
   else {
-    $this->flush if $this->{BUFFER} ne '' ;
-    $this->print_stdout( join("", (@_[0..$#_])) ) ;
+    if ( !$this->{AUTO_FLUSH} && !$this->{AUTOHEAD} && !$| ) {
+      #print main::STDOUT "BUF>> !$autoflus_val && !$this->{AUTO_FLUSH} && !$this->{AUTOHEAD} \n" ;
+      $this->{BUFFER} .= join("", (@_[0..$#_])) ;
+    }
+    else {
+      #print main::STDOUT "PRT>> !$autoflus_val && !$this->{AUTO_FLUSH} && !$this->{AUTOHEAD} [[$_[0]]]\n" ;
+      $this->flush if $this->{BUFFER} ne '' ;
+      $this->print_stdout( join("", (@_[0..$#_])) ) ;
+    }
   }
 
   return 1 ;

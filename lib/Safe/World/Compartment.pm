@@ -54,6 +54,8 @@ use Opcode 1.01, qw(
 
 my $default_share = ['*_'] ;
 
+my $SCALAR_R ; tie( $SCALAR_R , 'Safe::World::Compartment::SCALAR_R') ;
+
 #############################################################################
 
 sub new {
@@ -66,6 +68,16 @@ sub new {
 
   $obj->permit_only(':default') ;
   $obj->share_from('main', $default_share) ;
+  
+  {
+    ## (See Safe::World::Compartment::SCALAR_R at the end of this file).
+    ## Set the tied $^R to fix behavior:
+    my $tmp = $_ ;
+    $_ = \$SCALAR_R ;
+    $obj->reval('*^R = $_') ;
+    $_ = $tmp ;
+    $^R = undef ; ## Ensure that is reseted.
+  }
   
   Opcode_safe_pkg_prep($root) if($Opcode::VERSION > 1.04);
   
@@ -106,7 +118,7 @@ sub share_from {
 
   my $arg;
   foreach $arg (@$vars) {
-    next unless( $arg =~ /^[\$\@%*&]?\w[\w:]*$/ || $arg =~ /^\$\W$/ ) ;
+    next unless( $arg =~ /^[\$\@%*&]?\w[\w:]*$/ || $arg =~ /^\$\W\w?$/ ) ;
 
     my ($var, $type);
     $type = $1 if ($var = $arg) =~ s/^(\W)// ;
@@ -117,9 +129,50 @@ sub share_from {
           \${$pkg."::$var"} : ($type eq '@') ?
             \@{$pkg."::$var"} : ($type eq '%') ?
               \%{$pkg."::$var"} : ($type eq '*') ?
-                *{$pkg."::$var"} : undef ;
+                \*{$pkg."::$var"} : undef ;
   }
 }
+
+######################################
+# SAFE::WORLD::COMPARTMENT::SCALAR_R # TIE SCALAR FOR $^R
+######################################
+
+# The predefined variable $^R doesn't work like normal variables,
+# that to be global lives in the main:: package. $^R doesn't exists
+# at main::, soo $main::^R doesn't exists and we can't share it with
+# the World compartment. $^R actually points to the last scalar returned
+# by the code executed in the RE, soo $^R will point to different SCALARs
+# during the RE, and if we change by hand the scalar reference of *^R it
+# will be overwrited during the RE.
+#
+# To fix that I have used a closure in the
+# FETCH and STORE methods of the TIESCALAR, and set the scalar of the
+# GLOB reference inside the compartment (*^R) with the tied scalar.
+# Soo, if an RE compiled inside the compartment make some reference to $^R
+# it will see the external $^R through the TIED SCALAR.
+# 
+
+package Safe::World::Compartment::SCALAR_R ;
+
+sub TIESCALAR {
+  my $class = shift ;
+  my $ref = shift ;
+  return bless( \$ref , __PACKAGE__ ) ;
+}
+
+sub STORE {
+  my $this = shift ;
+  $^R = $_[0] ;
+  return $^R ;
+}
+
+sub FETCH {
+  my $this = shift ;
+  return $^R ;
+}
+
+sub UNTIE {}
+sub DESTROY {}
 
 #######
 # END #

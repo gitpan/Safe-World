@@ -26,6 +26,24 @@ $VERSION = '0.02' ;
   *Safe_World_NOW = \$Safe::World::NOW ;
 
 #########
+# BLOCK #
+#########
+
+sub block {
+  my $this = shift ;
+  $this->{BLOCKED} = 1 ;
+}
+
+###########
+# UNBLOCK #
+###########
+
+sub unblock {
+  my $this = shift ;
+  $this->{BLOCKED} = undef ;
+}
+
+#########
 # PRINT #
 #########
 
@@ -40,6 +58,8 @@ sub print_stderr {
   my $stderr = $this->{STDERR} ;
   
   $this->{LAST_ERROR} = $_[0] ;
+  
+  return if $this->{BLOCKED} ;
   
   if ( ref($stderr) eq 'SCALAR' ) { $$stderr .= $_[0] ;}
   elsif ( ref($stderr) eq 'CODE' ) {

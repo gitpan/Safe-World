@@ -23,7 +23,7 @@ use Safe::World::stderr ;
 use strict qw(vars);
 
 use vars qw($VERSION @ISA) ;
-$VERSION = '0.07' ;
+$VERSION = '0.08' ;
 
 ##########
 # SCOPES #
@@ -44,9 +44,10 @@ $VERSION = '0.07' ;
 
   use vars qw($NOW $EVALX) ;
 
-  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC , %WORLDS_LINKS) ;
+  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC , %WORLDS_LINKS , $IGNORE_EXIT) ;
   
   my $COMPARTMENT_NAME = 'SAFEWORLD' ;
+  my $COMPARTMENT_NAME_CACHE = 'SAFEWORLD_CACHE_' ;
   
   my @DENY_OPS = qw(chroot syscall exit dump fork lock threadsv) ;
   
@@ -98,15 +99,13 @@ $VERSION = '0.07' ;
   ###############
   ## SAFEWORLDx::WORLDSHARE::  ## used to link and unlink a WORLD with other WORLD.
 
-  
-  my ($NULL , @NULL , %NULL) ;
-  local(*NULL) ;
-
 ########
 # EXIT #
 ########
 
 sub EXIT {
+  return if $IGNORE_EXIT ;
+  
   if ( $NOW && ref($NOW) eq 'Safe::World' ) {
     my $exit ;
     if ( $NOW->{ONEXIT} && !$NOW->{EXIT} ) {
@@ -141,7 +140,15 @@ sub headers {
   return $this->{TIESTDOUT}->headers(@_) ;
 }
 
-sub stdout_data { return $_[0]->{TIESTDOUT}->stdout_data ; }
+sub stdout_data {
+  my $this = shift ;
+  return $this->{TIESTDOUT}->stdout_data(@_) ;
+}
+
+sub stdout_buffer_data {
+  my $this = shift ;
+  return $this->{TIESTDOUT}->buffer_data(@_) ;
+}
 
 #######
 # NEW # root , stdout , stdin , stderr , env , headout , headsplitter , autohead , &on_closeheaders , &on_exit , &on_select , &on_unselect , sharepack , flush , no_clean , no_set_safeworld
@@ -162,9 +169,9 @@ sub new {
   if ( !ref($this->{STDERR}) )                      { $this->{STDERR}  = \*{$this->{STDERR}} ;}
   if ( $this->{HEADOUT} && !ref($this->{HEADOUT}) ) { $this->{HEADOUT} = \*{$this->{HEADOUT}} ;}
   
-  if ( ref($this->{STDOUT})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
-  if ( ref($this->{STDIN})   !~ /^(?:GLOB)$/ )             { $this->{STDIN}   = undef ;}
-  if ( ref($this->{STDERR})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}  
+  # if ( ref($this->{STDOUT})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
+  # if ( ref($this->{STDERR})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}
+  # if ( ref($this->{STDIN})   !~ /^(?:GLOB)$/ )             { $this->{STDIN}   = undef ;}
   if ( ref($this->{HEADOUT}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{HEADOUT} = undef ;}
   
   ${$this->{STDOUT}}  .= '' if ref($this->{STDOUT}) eq 'SCALAR' ;
@@ -175,7 +182,7 @@ sub new {
 
   $this->{FLUSH} = $args{flush} ;
   
-  $this->{AUTOHEAD} = $args{autohead} ;
+  $this->{AUTOHEAD} = $args{autohead} if exists $args{autohead} ;
   $this->{AUTOHEAD} = 1 if ($this->{HEADOUT} && !exists $args{autohead}) ;
   
   $this->{HEADSPLITTER} = $args{headsplitter} || $args{headspliter} || qr/(?:\r\n\r\n|\012\015\012\015|\n\n|\015\015|\r\r|\012\012)/s if $this->{AUTOHEAD} ;
@@ -213,7 +220,13 @@ sub new {
   $this->{ENV} = $args{env} || $args{ENV} ;
   if ( ref($this->{ENV}) ne 'HASH') { $this->{ENV} = undef ;}
 
-  my $packname = $args{root} || $COMPARTMENT_NAME . ++$COMPARTMENT_X ;
+  my $packname = $args{root} ;
+  
+  if ( !$packname ) {
+    $packname = $args{is_cache} ? $COMPARTMENT_NAME_CACHE : $COMPARTMENT_NAME ;
+    $packname .= ++$COMPARTMENT_X ;
+  }
+
   $this->{ROOT} = $packname ;
  
   $this->{NO_SET_SAFEWORLD} = 1 if $args{no_set_safeworld} ;
@@ -247,7 +260,7 @@ sub new {
   $this->link_pack('UNIVERSAL') ;
   $this->link_pack('attributes') ;
   $this->link_pack('DynaLoader') ;
-  $this->link_pack('IO') ;
+#  $this->link_pack('IO') ;
   
 #  $this->link_pack('Exporter') ;
 #  $this->link_pack('warnings') ;
@@ -278,7 +291,7 @@ sub new {
 
   $this->set('%INC',{}) ;
   
-  $this->eval("no strict ;") ; ## just to load strict inside the compartment.
+  $this->eval("no strict ;") if !$args{no_strict} ; ## just to load strict inside the compartment.
   $this->unselect_static ;
 
   return $this ;
@@ -330,9 +343,7 @@ sub reset {
   
   my $packname = $this->{ROOT} ;
   
-  $this->{EXIT}      = undef ;
-  $this->{DESTROIED} = undef ;
-  $this->{CLEANNED}  = undef ;
+  $this->reset_internals ;
   
   $this->{STDOUT}  = $args{stdout} if $args{stdout} ;
   $this->{STDIN}   = $args{stdin} if $args{stdin} ;
@@ -344,9 +355,9 @@ sub reset {
   if ( $this->{STDERR}  && !ref($this->{STDERR}) )   { $this->{STDERR}  = \*{$this->{STDERR}} ;}
   if ( $this->{HEADOUT} && !ref($this->{HEADOUT}) )  { $this->{HEADOUT} = \*{$this->{HEADOUT}} ;}
   
-  if ( ref($this->{STDOUT})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
-  if ( ref($this->{STDIN})   !~ /^(?:GLOB)$/ )             { $this->{STDIN}   = undef ;}
-  if ( ref($this->{STDERR})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}  
+  # if ( ref($this->{STDOUT})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
+  # if ( ref($this->{STDERR})  !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}  
+  # if ( ref($this->{STDIN})   !~ /^(?:GLOB)$/ )             { $this->{STDIN}   = undef ;}
   if ( ref($this->{HEADOUT}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{HEADOUT} = undef ;}
   
   ${$this->{STDOUT}}  .= '' if ref($this->{STDOUT}) eq 'SCALAR' ;
@@ -393,6 +404,18 @@ sub reset {
   return 1 ;
 }
 
+###################
+# RESET_INTERNALS #
+###################
+
+sub reset_internals {
+  my $this = shift ;
+  
+  $this->{EXIT}      = undef ;
+  $this->{DESTROIED} = undef ;
+  $this->{CLEANNED}  = undef ;
+}
+
 ################
 # RESET_OUTPUT #
 ################
@@ -407,7 +430,7 @@ sub reset_output {
     $this->{STDOUT} = $args{stdout} ;
 
     if ( $this->{STDOUT} && !ref($this->{STDOUT}) ) { $this->{STDOUT} = \*{$this->{STDOUT}} ;}
-    if ( ref($this->{STDOUT}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
+    #if ( ref($this->{STDOUT}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDOUT}  = undef ;}
     ${$this->{STDOUT}} .= '' if ref($this->{STDOUT}) eq 'SCALAR' ;
     
     $this->{TIESTDOUT}->{STDOUT} = $this->{STDOUT} if $this->{STDOUT} ;
@@ -417,7 +440,7 @@ sub reset_output {
     $this->{STDERR} = $args{stderr} ;
 
     if ( $this->{STDERR} && !ref($this->{STDERR}) ) { $this->{STDERR} = \*{$this->{STDERR}} ;}
-    if ( ref($this->{STDERR}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}
+    #if ( ref($this->{STDERR}) !~ /^(?:GLOB|SCALAR|CODE)$/ ) { $this->{STDERR}  = undef ;}
     ${$this->{STDERR}} .= '' if ref($this->{STDERR}) eq 'SCALAR' ;
     
     $this->{TIESTDERR}->{STDERR} = $this->{STDERR} if $this->{STDERR} ;
@@ -437,7 +460,7 @@ sub reset_output {
     $this->{STDIN} = $args{stdin} ;
 
     if ( $this->{STDIN} && !ref($this->{STDIN}) ) { $this->{STDIN} = \*{$this->{STDIN}} ;}
-    if ( ref($this->{STDIN}) !~ /^(?:GLOB)$/ ) { $this->{STDIN} = undef ;}
+    #if ( ref($this->{STDIN}) !~ /^(?:GLOB)$/ ) { $this->{STDIN} = undef ;}
 
     *{"$packname\::STDIN"}  = $this->{STDIN} if $this->{STDIN} ;
   }
@@ -506,18 +529,81 @@ sub eval {
       $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($_[0]) ; ##Safe::World::select->new($_[0]) ;
     }
     
-    $_[0]->{INSIDE} = 1 ;
+    $NOW->{INSIDE} = 1 ;
     
     if ( wantarray ) {
-      my @ret = $_[0]->{SAFE}->reval("\@_ = () ; $_[1]") ;    
-      $_[0]->warn($@ , 1) if $@ ;
+      my @ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;    
+      $NOW->warn($@ , 1) if $@ ;
       $NOW->{INSIDE} = 0 ;
       return @ret ;
     }
     else {
-      my $ret = $_[0]->{SAFE}->reval("\@_ = () ; $_[1]") ;
-      $_[0]->warn($@ , 1) if $@ ;
+      my $ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;
+      $NOW->warn($@ , 1) if $@ ;
       $NOW->{INSIDE} = 0 ;
+      return $ret ;
+    }
+  }
+}
+
+################
+# EVAL_NO_WARN #
+################
+
+sub eval_no_warn {
+  if ( $_[0]->{WORLD_SHARED} && !$_[0]->{DESTROIED} && $NOW != $_[0] ) {
+    $_[0]->warn("Don't evaluate inside a linked pack (shared with $_[0]->{WORLD_SHARED})! Please unlink first." , 1) ;
+  }
+  elsif ( $_[0]->{EXIT} && !$_[0]->{DESTROIED} && $NOW != $_[0] ) {
+    $_[0]->warn("Can't evaluate after exit!" , 1) ;
+    return ;
+  }
+  
+  no warnings ;
+  local $^W = 0 ;
+  $IGNORE_EXIT = 1 ;
+  
+  my %__SAVE_SIGS__ ;
+  
+  $__SAVE_SIGS__{warn} = $SIG{__WARN__} ;
+  $__SAVE_SIGS__{die} = $SIG{__DIE__} ;
+  
+  $SIG{__WARN__} = sub {} ;
+  $SIG{__DIE__} = sub {} ;
+  
+  $_[0]->{TIESTDERR}->block ;
+
+  if ( $_[0]->{INSIDE} ) {
+    ++$EVALX ;
+    if ( wantarray ) {
+      my @__HPL_ReT__ = eval("no strict;\@_ = () ; package main ; $_[1]") ;
+      $SIG{__WARN__} = $__SAVE_SIGS__{warn} ; $SIG{__DIE__} = $__SAVE_SIGS__{die} ; $IGNORE_EXIT = undef ; $NOW->{TIESTDERR}->unblock ;
+      return @__HPL_ReT__ ;
+    }
+    else {
+      my $__HPL_ReT__ = eval("no strict;\@_ = () ; package main ; $_[1]") ;
+      $SIG{__WARN__} = $__SAVE_SIGS__{warn} ; $SIG{__DIE__} = $__SAVE_SIGS__{die} ; $IGNORE_EXIT = undef ; $NOW->{TIESTDERR}->unblock ;
+      return $__HPL_ReT__ ;
+    }
+  }
+  else {
+    my $SAFE_WORLD_selected ;
+    if ( $NOW != $_[0] ) {
+      $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($_[0]) ; ##Safe::World::select->new($_[0]) ;
+    }
+    
+    $NOW->{INSIDE} = 1 ;
+    
+    if ( wantarray ) {
+      my @ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;    
+      $NOW->{INSIDE} = 0 ;
+      $SIG{__WARN__} = $__SAVE_SIGS__{warn} ; $SIG{__DIE__} = $__SAVE_SIGS__{die} ; $IGNORE_EXIT = undef ; $NOW->{TIESTDERR}->unblock ;
+      return @ret ;
+    }
+    else {
+      my $ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;
+      $NOW->{INSIDE} = 0 ;
+      $SIG{__WARN__} = $__SAVE_SIGS__{warn} ; $SIG{__DIE__} = $__SAVE_SIGS__{die} ; $IGNORE_EXIT = undef ; $NOW->{TIESTDERR}->unblock ;
       return $ret ;
     }
   }
@@ -812,6 +898,9 @@ sub unshare_vars {
     
   my $pack = $this->{ROOT} ;
   
+  my ($NULL , @NULL , %NULL) ;
+  local(*NULL) ;
+  
   foreach my $var ( keys %{ $this->{SHARING} } ) {
     my ($var_tp,$name) = ( $var =~ /([\$\@\%\*])(\S+)/ );
     $name =~ s/^{'(\S+)'}$/$1/ ;
@@ -822,6 +911,14 @@ sub unshare_vars {
     elsif ($var_tp eq '%') { *{$pack.'::'.$name} = \%NULL ;}
     elsif ($var_tp eq '*') { *{$pack.'::'.$name} = \*NULL ;}
   }
+  
+  if ( !$this->{LINK_PACK_USED} ) {
+    *{$pack.'::_'} = \$NULL ;
+    *{$pack.'::_'} = \@NULL ;
+    *{$pack.'::_'} = \*NULL ;
+  }
+  
+  return 1 ;
 }
 
 #############
@@ -834,11 +931,13 @@ sub link_pack {
   my ( $pack ) = @_ ;
   
   my $pack_alise = $pack ;
-  $pack_alise =~ s/^$COMPARTMENT_NAME\d+::// ;
+  $pack_alise =~ s/^(?:$COMPARTMENT_NAME|$COMPARTMENT_NAME_CACHE)\d+::// ;
 
   *{"$this->{ROOT}\::$pack_alise\::"} = *{"$pack\::"} ;
   
   $this->{LINKED_PACKS}{$pack_alise} = 1 ;
+  
+  $this->{LINK_PACK_USED} = 1 ;
   
   return 1 ;
 }
@@ -937,13 +1036,83 @@ sub unset_sharedpack {
 }
 
 ##############
+# USE_SHARED #
+##############
+
+sub use_shared {
+  my $this = shift ;
+  my $module = shift ;
+  if ( $this->{INSIDE} ) { return ;}
+  
+  my $pm = $module ;
+  $pm =~ s/::/\//g ; $pm .= '.pm' ;
+  
+  my $SAFE_WORLD_selected ;
+  if ( $NOW != $this ) {
+    $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($this) ; ## Safe::World::select->new($this) ;
+  }
+  
+  my (%new_incs) ;
+  
+  {
+    if ( $INC{$pm} ) { return "Module $module already cached!" ;}
+    
+    my %inc_now = %INC ;
+    
+    $this->eval_no_warn("require $module") ;
+    
+    if ( $@ ) {
+      return "Error on loading $module: $@" ;
+    }
+    else {
+      foreach my $Key ( keys %INC ) { $new_incs{$Key} = $INC{$Key} if !$inc_now{$Key} && ($Key =~ /^\w.*?\.pm$/) ;}
+    }
+  }
+  
+  my ( %inc , @link_pack ) ;
+  
+  if ( %new_incs ) {
+    my (%base_set , @set_shared) ;
+    foreach my $Key ( sort keys %new_incs ) {
+      $inc{$Key} = '#shared#' ;
+      $this->{USE_SHARED_INC}{$Key} = 1 ;
+        
+      my $module = $Key ;
+      $module =~ s/[\\\/]/::/g ;
+      $module =~ s/\.pm$// ;
+
+      my @path = split("::" , $module) ;
+      
+      my $set ;
+      while( @path ) {
+        if ( $base_set{ join("::", @path) } ) { $set = 1 ; last ;}
+        pop (@path) ;
+      }
+      
+      next if $set ;
+      $base_set{$module} = 1 ;
+      
+      push(@set_shared , $module) ;
+
+      push(@link_pack , $this->{ROOT}."::$module") ;
+    }
+    
+    $this->set_sharedpack(@set_shared) ;
+  }
+  
+
+  
+  return( \@link_pack , \%inc ) ;
+}
+
+##############
 # LINK_WORLD #
 ##############
 
 sub link_world {
   my $this = shift ;
   my $world = shift ;
-  if ( $this->{INSIDE} || ref($world) ne 'Safe::World' || $world->{WORLD_SHARED} ) { return ;}
+  if ( $this->{INSIDE} || ref($world) ne 'Safe::World' || $world->{WORLD_SHARED} || $world->{INSIDE} ) { return ;}
 
   my $world_root = $world->{ROOT} ;
   my $root = $this->{ROOT} ;
@@ -951,16 +1120,33 @@ sub link_world {
   my @shared_pack = @{$world->{SHAREDPACK}} ;
   my %shared_pack = map { ("$_\::" => 1) } @shared_pack ;
 
-  my $inc = \%{$this->{ROOT}.'::INC'} ;
+  my $inc ;
+  if ( $NOW == $this ) { $inc = \%INC ;}
+  else { $inc = $this->{SHARING}{'%main::INC'}{IN} ;}
+  
+  my $world_inc ;
+  if ( $NOW == $world ) { $world_inc = \%INC ;}
+  else { $world_inc = $world->{SHARING}{'%main::INC'}{IN} ;}
+
   foreach my $shared_pack ( @shared_pack ) {
-    $this->link_pack("$world_root\::$shared_pack") ;
-    $$inc{ $world->{SHAREDPACK_PM}{$shared_pack} } = '#shared#' ;
+    if ( !$$inc{ $world->{SHAREDPACK_PM}{$shared_pack} } ) {
+      $this->link_pack("$world_root\::$shared_pack") ;
+    }
+    
+    my $base = $shared_pack ;
+    $base =~ s/::/\//g ;
+    
+    foreach my $Key ( keys %$world_inc ) {
+      if ( !$this->{USE_SHARED_INC}{$Key} && !$$inc{$Key} && $Key =~ /^(?:auto\/)?\Q$base\E(?:\/|\.)/ ) { $$inc{$Key} = '#shared#' ;}
+    }
   }
+  
+  foreach my $Key ( keys %{ $this->{USE_SHARED_INC} } ) { $$inc{$Key} = '#shared#' ;}
   
   my $table = *{"$world_root\::"}{HASH} ;
   
   foreach my $Key ( keys %$table ) {
-    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*(?:main|$world_root)::/ && $Key !~ /^(?:STDOUT|STDERR|.*?::)$/ && $Key !~ /[^\w:]/s) {
+    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*(?:main|$world_root)::/ && $Key !~ /^(?:STDOUT|STDERR|_|INC|.*?::)$/ && $Key !~ /[^\w:]/s) {
       *{"$world_root\::WORLDSHARE::$Key"} = \${"$world_root\::$Key"} ;
       *{"$world_root\::WORLDSHARE::$Key"} = \@{"$world_root\::$Key"} ;
       *{"$world_root\::WORLDSHARE::$Key"} = \%{"$world_root\::$Key"} ;
@@ -983,7 +1169,7 @@ sub link_world {
 sub unlink_world {
   my $this = shift ;
   my $world = shift ;
-  if ( $this->{INSIDE} || ref($world) ne 'Safe::World' || !$world->{WORLD_SHARED} ) { return ;}
+  if ( $this->{INSIDE} || ref($world) ne 'Safe::World' || !$world->{WORLD_SHARED} || $world->{INSIDE} ) { return ;}
 
   my $world_root = $world->{ROOT} ;
   my $root = $this->{ROOT} ;
@@ -991,18 +1177,32 @@ sub unlink_world {
   my @shared_pack = @{$world->{SHAREDPACK}} ;
   my %shared_pack = map { ("$_\::" => 1) } @shared_pack ;
 
-  my $inc = \%{$this->{ROOT}.'::INC'} ;
-  my $pm ;
+  my $inc ;
+  if ( $NOW == $this ) { $inc = \%INC ;}
+  else { $inc = $this->{SHARING}{'%main::INC'}{IN} ;}
+  
+  my $world_inc ;
+  if ( $NOW == $world ) { $world_inc = \%INC ;}
+  else { $world_inc = $world->{SHARING}{'%main::INC'}{IN} ;}
+
   foreach my $shared_pack ( @shared_pack ) {
     $this->unlink_pack($shared_pack) ;
-    $pm = $world->{SHAREDPACK_PM}{$shared_pack} ;
-    delete $$inc{$pm} if $$inc{$pm} eq '#shared#' ;
+    
+    my $base = $shared_pack ;
+    $base =~ s/::/\//g ;
+    foreach my $Key ( keys %$inc ) {
+      if ( $Key =~ /^(?:auto\/)?\Q$base\E(?:\/|\.)/ ) {
+        $$world_inc{$Key} = $$inc{$Key} if !$$world_inc{$Key} && $$inc{$Key} ne '#shared#' ;
+        delete $$inc{$Key} ;
+      }
+      elsif ( $$inc{$Key} eq '#shared#' ) { delete $$inc{$Key} ;}
+    }
   }
   
   my $table = *{"$world_root\::"}{HASH} ;
   
   foreach my $Key ( keys %$table ) {
-    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*(?:main|$root)::(.*)/ && $Key !~ /^(?:STDOUT|STDERR|.*?::)$/ && $Key !~ /[^\w:]/s) {
+    if ( !$shared_pack{$Key} && $$table{$Key} =~ /^\*(?:main|$root)::(.*)/ && $Key !~ /^(?:STDOUT|STDERR|_|INC|.*?::)$/ && $Key !~ /[^\w:]/s) {
       $$table{$Key} = "*$world_root\::WORLDSHARE::$1" ;
     }
   }
@@ -1066,14 +1266,16 @@ sub scanpack_table {
   my $fullname ;
   foreach my $symb ( keys %$package ) {
     $fullname = "$packname$symb" ;
-    if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ ) {
-      if (defined $$fullname) { push(@table , "\$$fullname") ;}
-      if (defined %$fullname) { push(@table , "\%$fullname") ;}
-      if (defined @$fullname) { push(@table , "\@$fullname") ;}
-      if (defined &$fullname) { push(@table , "\&$fullname") ;}
+    if ( $symb !~ /::$/ && ($symb !~ /[^\w:]/ || $symb =~ /^\W\w?$/ ) ) {
+      my $ok ;
+      if (defined $$fullname) { push(@table , "\$$fullname") ; $ok = 1 ;}
+      if (defined %$fullname) { push(@table , "\%$fullname") ; $ok = 1 ;}
+      if (defined @$fullname) { push(@table , "\@$fullname") ; $ok = 1 ;}
+      if (defined &$fullname) { push(@table , "\&$fullname") ; $ok = 1 ;}
       if (*{$fullname}{IO} && fileno $fullname) {
-        push(@table , "\*$fullname") ;
+        push(@table , "\*$fullname") ; $ok = 1 ;
       }
+      if (!$ok) { push(@table , "\$$fullname") ;}
     }
   }
 
@@ -1259,16 +1461,22 @@ sub DESTROY {
   my $this = shift ;
   return if $this->{DESTROIED} ;
   
-  ##print main::STDOUT "DEST>> $this->{ROOT}\n" ;
-  
-  $this->{DESTROIED} = 1 ;
+  ##print main::STDOUT "DESTSAFE>> $this->{ROOT}\n" ;
 
   $this->unlink_all_worlds ;
   $this->close ;
   
+  untie *{"$this->{ROOT}\::STDOUT"} ;
+  untie *{"$this->{ROOT}\::STDERR"} ;
+  
+  $this->unshare_vars ;
+  
+  $this->{DESTROIED} = 1 ;
+  
   $this->unlink_pack_all(1) ;
 
   $this->CLEAN ;
+
 }
 
 #########
@@ -1290,24 +1498,23 @@ sub CLEAN {
     foreach my $var ( keys %{ $this->{SHARING} } ) {
       my ($var_tp,$var_name) = ( $var =~ /([\$\@\%\*])(\S+)/ ) ;
       $var_name =~ s/^{'(\S+)'}$/$1/ ;
-      $var_name =~ s/^main::// ;
     
       if ($var_tp eq '$') {
-        my $scalar = ${'main::'.$var_name} ;
+        my $scalar = ${$var_name} ;
         $this->{SHARING}{$var} = \$scalar ;
       }
-      elsif ($var_tp eq '@') { $this->{SHARING}{$var} = [@{'main::'.$var_name}] ;}
-      elsif ($var_tp eq '%') { $this->{SHARING}{$var} = {%{'main::'.$var_name}} ;}
-      elsif ($var_tp eq '*') { $this->{SHARING}{$var} = \*{'main::'.$var_name} ;}
+      elsif ($var_tp eq '@') { $this->{SHARING}{$var} = [@{$var_name}] ;}
+      elsif ($var_tp eq '%') { $this->{SHARING}{$var} = {%{$var_name}} ;}
+      elsif ($var_tp eq '*') { $this->{SHARING}{$var} = \*{$var_name} ;}
     }
   ############
   
   my $packname = $this->{ROOT} ;
   
   foreach my $packs_i ( $this->scanpacks ) {
-    $this->undef_pack($packs_i) ;
+    $this->undef_pack($packs_i , $this->{LINK_PACK_USED} ) ;
   }
-
+  
   my $main_packname = "main::$packname\::" ;
 
   undef %{*{$main_packname}{HASH}} ;
@@ -1319,12 +1526,11 @@ sub CLEAN {
     foreach my $var ( keys %{ $this->{SHARING} } ) {
       my ($var_tp,$var_name) = ( $var =~ /([\$\@\%\*])(\S+)/ ) ;
       $var_name =~ s/^{'(\S+)'}$/$1/ ;
-      $var_name =~ s/^main::// ;
 
-      if ($var_tp eq '$')    { ${'main::'.$var_name} = ${ $this->{SHARING}{$var} } ;}
-      elsif ($var_tp eq '@') { @{'main::'.$var_name} = @{ $this->{SHARING}{$var} } ;}
-      elsif ($var_tp eq '%') { %{'main::'.$var_name} = %{ $this->{SHARING}{$var} } ;}
-      elsif ($var_tp eq '*') { *{'main::'.$var_name} = $this->{SHARING}{$var} ;}
+      if ($var_tp eq '$')    { ${$var_name} = ${ $this->{SHARING}{$var} } ;}
+      elsif ($var_tp eq '@') { @{$var_name} = @{ $this->{SHARING}{$var} } ;}
+      elsif ($var_tp eq '%') { %{$var_name} = %{ $this->{SHARING}{$var} } ;}
+      elsif ($var_tp eq '*') { *{$var_name} = $this->{SHARING}{$var} ;}
     }
   ############
   
@@ -1337,7 +1543,9 @@ sub CLEAN {
 
 sub undef_pack {
   my $this = shift ;
-  my ( $packname ) = @_ ;
+  my ( $packname , $link_pack_used ) = @_ ;
+  
+  #print main::STDOUT "UNDEFPACK>> $packname ". (scalar *{'main::'}{HASH}) ."\n" ;
   
   $packname .= '::' unless $packname =~ /::$/ ;
   no strict "refs" ;
@@ -1351,41 +1559,58 @@ sub undef_pack {
   
   ## 'no warning' still have some warns on Perl-5.8.x
   my $prev_sigwarn = $SIG{__WARN__} ;
+  my $prev_sigdie = $SIG{__DIE__} ;
   $SIG{__WARN__} = sub{} ;
-                  
+  $SIG{__DIE__} = sub{} ;
+  $IGNORE_EXIT = 1 ;
+
   my ($fullname) ;
   foreach my $symb ( keys %$package ) {
     $fullname = "$packname$symb" ;
-    if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ && $symb !~ /^\d/ ) {
-      #print main::STDOUT "$packname>> $symb >> $fullname\n" ;
-
-      if (defined &$fullname) {
-        if (my $p = prototype $fullname) { ++$EVALX ; *{$fullname} = eval "sub ($p) {}" ;}
-        else                             { *{$fullname} = $tmp_sub ;}
-        undef &$fullname ;
-      }
-
-      if (*{$fullname}{IO}) { close $fullname ;}
+    if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ && $symb !~ /^[1-9\.]/ && (!$link_pack_used || ($link_pack_used && $symb ne '_' )) ) {
+      #print main::STDOUT "undef>> $packname>> $symb >> $fullname\n" ;
       
-      #if (defined @$fullname) { undef @$fullname ;}
-      if (defined *{$fullname}{ARRAY}) { undef @$fullname ;}
-      #undef @$fullname ;
+      eval {
+        if (defined &$fullname) {
+          if (my $p = prototype $fullname) { ++$EVALX ; *{$fullname} = eval "sub ($p) {}" ;}
+          else                             { *{$fullname} = $tmp_sub ;}
+          undef &$fullname ;
+        }
 
-      #if (defined %$fullname) { undef %$fullname ;}
-      if (defined *{$fullname}{HASH}) { undef %$fullname ;}
-      #undef %$fullname ;
-      
-      #if (defined $$fullname) { undef $$fullname ;}
-      undef $$fullname ;
-      
-      undef *{$fullname} ;
+        untie *{$fullname} if tied *{$fullname} ;
+        if (*{$fullname}{IO}) { close $fullname ;}
+        
+        #if (defined @$fullname) { undef @$fullname ;}
+        if (defined *{$fullname}{ARRAY}) {
+          untie @$fullname if tied @$fullname ;
+          undef @$fullname ;
+        }
+        #undef @$fullname ;
+  
+        #if (defined %$fullname) { undef %$fullname ;}
+        if (defined *{$fullname}{HASH}) {
+          untie %$fullname if tied %$fullname ;
+          undef %$fullname ;
+        }
+        #undef %$fullname ;
+        
+        #if (defined $$fullname) { undef $$fullname ;}
+        untie $$fullname if tied $$fullname ;
+        undef $$fullname ;
+        
+        undef *{$fullname} ;
+      };
     }
+    #else { print main::STDOUT "** $packname>> $symb >> $fullname\n" ;}
   }
+
 
   undef %{*{$packname}{HASH}} ;
   undef *{$packname} ;
-  
+
+  $IGNORE_EXIT = undef ;
   $SIG{__WARN__} = $prev_sigwarn ;
+  $SIG{__DIE__} = $prev_sigdie ;
 
   return 1 ;
 }
@@ -1402,12 +1627,45 @@ __END__
 
 Safe::World - Create multiple virtual instances of a Perl interpreter that can be assembled together.
 
+=head1 SYNOPSIS
+
+See I<USE> section for complexer example and the test.pl script.
+
+  use Safe::World ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,     ## - redirect STDOUT to this scalar.
+  stderr  => \$stderr ,    ## - redirect STDERR to this scalar.
+  flush => 1 ,             ## - output is flushed, soo don't need to wait exit to
+                           ##   have all the data inside $stdout.
+  ) ;
+  
+  ## Evaluate some code:
+  $world->eval(q`
+     use Data::Dumper ;
+     print Dumper( {a => 1 , b => 2} ) ;
+  `);
+  
+  $world->close ; ## ensure that everything is finished and flushed.
+
+  die($stderr) if $stderr ;
+  
+  print $stdout ;
+  
+  $world = undef ; ## Destroy the world. Here the compartment is cleanned.
+
+
+B<Note that in this example, inside the World is loaded L<Data::Dumper>, but I<Data::Dumper> was loaded only inside of it, keeping the outside normal.>
+
 =head1 DESCRIPTION
 
 With I<Safe::World> you can create multiple virtual instances/compartments of a Perl interpreter,
 that will work/run without touch the other instances/compartments and mantaining the main interpreter normal.
 
-Each instance (WORLD object) has their own STDOUT, STDERR and STDIN handlers, also has a fake HEADOUT output for the headers implemented inside the STDOUT.
+Actually each Each instance (WORLD object), is a Safe compartment (I<Safe::World::Compartment>) with all the
+resources of a normal Perl interpreter implemented (IO, @INC, %INC, Dynaloader::, etc...). But what happens inside each World doesn't change the enverioment outside of it or other Worlds.
+
+Each instance (WORLD object) has their own STDOUT, STDERR and STDIN handlers, also has a fake HEADOUT output (when the argument I<headout> is past) for the headers implemented inside the STDOUT.
 Soo, you can use this to redirect the outputs of the WORLD object to a FILEHANDLER, SCALAR or a SUB.
 
 The module I<Safe::World> was created for 3 purposes:
@@ -1588,6 +1846,8 @@ The HASH reference for the internal I<%ENV> of the World.
 
 If TRUE tell that STDOUT will be always flushed ( $| = 1 ).
 
+I<** This is good to use if you are using a SCALAR as STDOUT. Also will run faster, since uses a simple STDOUT handler.>
+
 =item no_clean (bool)
 
 If TRUE tell that the compartment wont be cleaned when destroyed.
@@ -1632,6 +1892,8 @@ I<Sub> to be called when the headers are closed.
 
 I<Sub> to be called when exit() is called.
 
+I<** If the I<sub> returns '0', exit will be skiped.>
+
 =item on_select (CODE)
 
 I<Sub> to be called when the WORLD is selected to evaluate codes inside it.
@@ -1658,7 +1920,9 @@ Call a I<sub> inside the World and returning their values.
 
 =head2 close
 
-Ensure that everything is finished and flushed. You can't evaluate codes after this!
+Ensure that everything is finished and flushed.
+
+B<You can't evaluate codes after this!>
 
 =head2 close_tiestdout()
 
@@ -1671,6 +1935,10 @@ Close the tied STDERR.
 =head2 eval (CODE)
 
 Evaluate a code inside the World and return their values.
+
+=head2 eval_no_warn (CODE)
+
+Evaluate a code inside the World without error alerts, warn(), die(), exit() or any output to STDERR.
 
 =head2 eval_pack (PACKAGE , CODE)
 
@@ -1695,7 +1963,7 @@ Same as eval_args(), but setting the package name to run the code.
 
 Set $| to 1 or 0 if I<bool> is defined.
 
-Also flush STDOUT. Soo, if some sata exists in the buffer it will be flushed to the output.
+Also flush STDOUT. Soo, if some data exists in the buffer it will be flushed to the output.
 
 =head2 get (VAR)
 
@@ -1711,7 +1979,7 @@ Return some variable value inside some package in the World:
 
 =head2 get_ref (VAR)
 
-Return reference of to a variable:
+Return a reference to a variable:
 
   my $env = $world->get_ref('%ENV') ;
   $$env{ENV}{DOCUMENT_ROOT} = '/home/httpd/www' ; ## Set the value inside the World.
@@ -1729,6 +1997,12 @@ Return reference B<copy> of a variable:
 Return the headers data.
 
 ** Note that this will only return data if I<HEADOUT> is defined as SCALAR.
+
+=head2 use_shared (MODULE)
+
+Load a module inside a World created for cache (an World to be linked to the others).
+
+This will require inside the World the I<MODULE> and handle automatically the I<sharedpack> list of all the modules loaded and sub-loaded by the MODULE.
 
 =head2 link_pack (PACKAGE)
 
@@ -1867,9 +2141,13 @@ The HASH reference for the internal I<%ENV> of the World.
 
 =back
 
+=head2 reset_internals
+
+Reset the internal flags. Soo, if the World was exited, can be reused.
+
 =head2 reset_output
 
-Reset the outputs (STDOUT, STDERR, STDIN, HEADOUT).
+Redefine the outputs (STDOUT, STDERR, STDIN, HEADOUT) targets.
 
 Arguments: stdout, stderr, stdin, headout.
 
@@ -1952,11 +2230,21 @@ Set a list of variables to be shared:
 
 Unshare a list of variables
 
-=head2 stdout_data
+=head2 stdout_data (NEW_DATA)
 
 Return the stdout data.
 
-** Note that this will only return data if I<STDOUT> is defined as SCALAR.
+I<** Note that this will only return data if I<STDOUT> is defined as SCALAR.>
+
+I<(NEW_DATA)> can be used to set the new value of stdout data or to undef it.
+
+=head2 stdout_buffer_data (NEW_DATA)
+
+Return the buffered stdout data.
+
+I<** Note that this will only return data if I<STDOUT> is not FLUSHED.>
+
+I<(NEW_DATA)> can be used to set the new value of the buffer or to undef it.
 
 =head2 tiestdout
 
@@ -1970,6 +2258,88 @@ The tiehandler of STDERR.
 
 Send some I<warn> message to the world, that will be redirected to the STDERR of the World.
 
+=head1 CACHING PERL MODULES EXAMPLE
+
+To make a cache system for the Perl Modules you should use the method I<use_shared()> and 2 Worlds, one as cache and other for execution:
+
+  use Safe::World ;
+  
+  ## Cache world shouldn't have output, soo using $tmp:
+  my $tmp ;
+  
+  my $world_cache = Safe::World->new(
+  stdout => \$tmp ,
+  stderr  => \$tmp ,
+  flush => 1 ,
+  ) ;
+  
+  ## Cache this perl module:
+  $world_cache->use_shared('Data::Dumper') ;
+  
+  ## Run 2 Worlds using Data::Dumper cached:
+  for(1..3) {
+    my ( $stdout , $stderr ) ;
+    my $world = Safe::World->new(
+    stdout => \$stdout ,
+    stderr  => \$stderr ,
+    flush => 1 ,
+    ) ;
+    
+    $world->link_world($world_cache) ;
+  
+    $world->eval(q`
+       print Data::Dumper::Dumper( \%INC ) ;
+    `);
+    
+    $world->close ; ## ensure that everything is finished and flushed.
+                    ## close() also make an unlink_all_worlds() to
+                    ## free $world_cache for the next World. 
+    
+    print "$stdout\n" ;
+    print "=======================\n" ;
+  }
+
+
+And here's the output:
+
+  
+  $VAR1 = {
+            'Carp.pm' => '#shared#',
+            'Exporter.pm' => '#shared#',
+            'XSLoader.pm' => '#shared#',
+            'strict.pm' => 'C:/Perl/lib/strict.pm',
+            'warnings/register.pm' => '#shared#',
+            'warnings.pm' => '#shared#',
+            'overload.pm' => '#shared#',
+            'Data/Dumper.pm' => '#shared#'
+          };
+  
+  =======================
+  $VAR1 = {
+            'Carp.pm' => '#shared#',
+            'Exporter.pm' => '#shared#',
+            'XSLoader.pm' => '#shared#',
+            'strict.pm' => 'C:/Perl/lib/strict.pm',
+            'warnings/register.pm' => '#shared#',
+            'warnings.pm' => '#shared#',
+            'overload.pm' => '#shared#',
+            'Data/Dumper.pm' => '#shared#'
+          };
+  
+  =======================
+  $VAR1 = {
+            'Carp.pm' => '#shared#',
+            'Exporter.pm' => '#shared#',
+            'XSLoader.pm' => '#shared#',
+            'strict.pm' => 'C:/Perl/lib/strict.pm',
+            'warnings/register.pm' => '#shared#',
+            'warnings.pm' => '#shared#',
+            'overload.pm' => '#shared#',
+            'Data/Dumper.pm' => '#shared#'
+          };
+  
+  =======================
+  
 
 =head1 SEE ALSO
 

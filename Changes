@@ -1,6 +1,18 @@
 Revision history for Perl extension Safe::World.
 
 
+0.08  29 Dec 2003
+      - Added method reset_internals().
+      - Added method stdout_buffer_data().
+      - Fixed %INC access for link_workd() and unlink_world().
+      - Added unshare_vars() call on DESTROY().
+      - Added method use_shared().
+      - Fixed bug on reuse of cached package and compiled references to *_, specialy @_.
+      - Fixed behavior of $^R, that is a global variable that can't be shared, since doesn't exists at $main::^R,
+        and have his SCALAR reference change during the RE. ($^R is used by REGEXP, see perlvar POD).
+      - Added method eval_no_warn(), to run codes and do not have any alert, error, die, or warn.
+
+
 0.07  21 Dec 2003
       - Added cache of scopes at Safe::World::Scope.
       - Blocked access to the symbols tables through Safe::World::Scope objects.

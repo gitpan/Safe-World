@@ -154,6 +154,8 @@ sub scanpack_table {
 sub __SAFEWORLD_HOOK__ {
   my $__HOOK__ = shift ;
   my $__TABLE__ = shift ;
+  
+  ##print main::STDOUT "SCOPE>> @_\n" ;
 
   if ( $_[0] eq 'call' ) { shift ;
     my $name = shift ;

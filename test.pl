@@ -3,13 +3,67 @@
 ###use Data::Dumper ; print Dumper( $world ) ;
 
 use Test;
-BEGIN { plan tests => 61 } ;
+BEGIN { plan tests => 70 } ;
 
 use Safe::World ;
 
 use strict ;
 use warnings qw'all' ;
 
+#########################
+{
+
+  my ( $stdout , $stderr , $headout ) ;
+
+  my $world = Safe::World->new(
+  stdout       => \$stdout ,
+  stderr       => \$stderr ,
+  headout      => \$headout ,
+  no_strict    => 1,
+  headsplitter => 'HTML' ,
+  autohead     => 1 ,
+  on_closeheaders => sub {
+                       my ( $pack , $headers ) = @_ ;
+                       $pack->print_stdout("[[$headers]]") ;
+                       $pack->headers('') ;
+                       return 1 ;
+                     } ,
+  ) ;
+  
+  $| = 0 ;
+  
+  $world->print_header("X-Powered-By: Safe::World\n") ;
+  $world->print_header("Content-type: text/html\n\n") ;
+  
+  $world->eval(q`
+     print "<pre>\n\n" ;
+
+     $|=1;
+     my $sel = select ;
+     print "content2 $sel\n" ;
+     
+     my $sel = select ;
+     print "</pre>\n" ;
+  `);
+  
+  $world->close ;
+
+  $world = undef ;
+  
+  ok($stdout , q`[[X-Powered-By: Safe::World
+Content-type: text/html
+
+]]<pre>
+
+content2 SAFEWORLD1::STDOUT
+</pre>
+`);
+
+  ok($stderr , '') ;
+  
+  ok($headout , '') ;
+
+}
 #########################
 {
 
@@ -337,8 +391,7 @@ use warnings qw'all' ;
   
   $world1->eval(q`
     my @incs = sort keys %INC ;
-    print "incs> @incs\n" ;
-    
+    print "incs> @incs >> $INC{'test/shared.pm'}\n" ;
     $TEST = 'w1' ;
     print ">> $test::shared::VAR\n" ;
     test::shared::method(1) ;
@@ -360,8 +413,7 @@ use warnings qw'all' ;
   
   $world2->eval(q`
     my @incs = sort keys %INC ;
-    print "incs> @incs\n" ;
-    
+    print "incs> @incs >> $INC{'test/shared.pm'}\n" ;
     $TEST = 'w2' ;
     print ">> $test::shared::VAR\n" ;
     test::shared::method(2) ;
@@ -379,10 +431,10 @@ use warnings qw'all' ;
   ok($stdout0 , "incs> strict.pm test/shared.pm\n>> foovar\nSHARED[1]! [w0][w0] <<0>>\nincs> strict.pm test/shared.pm\n>> foovar\nSHARED[4]! [w0][w0] <<0.1>>\n");
   ok($stderr0 , '') ;
 
-  ok($stdout1 , "incs> strict.pm\n>> foovar\nSHARED[2]! [w1][w1] <<1>>\n");
+  ok($stdout1 , "incs> strict.pm test/shared.pm >> #shared#\n>> foovar\nSHARED[2]! [w1][w1] <<1>>\n");
   ok($stderr1 , '') ;
 
-  ok($stdout2 , "incs> strict.pm\n>> foovar\nSHARED[3]! [w2][w2] <<2>>\n");
+  ok($stdout2 , "incs> strict.pm test/shared.pm >> #shared#\n>> foovar\nSHARED[3]! [w2][w2] <<2>>\n");
   ok($stderr2 , '') ;
 
 }
@@ -724,6 +776,50 @@ package main ;
   
   ok($stdout , 'TEST! foovar! >> argmunet|var: foovar!|var after set: 123|') ;
   ok($stderr , '') ;
+
+}
+#########################
+{
+
+  my ( $stdout0 , $stderr0 ) ;
+
+  my $world_cache = Safe::World->new(
+  stdout => \$stdout0 ,
+  stderr => \$stderr0 ,
+  flush  => 1 ,
+  ) ;
+  
+  my ( $link_pack , $inc ) = $world_cache->use_shared('test::useshared') ;
+  
+  ok( @$link_pack ) ;
+  ok( (keys %$inc) ) ;
+  
+  $world_cache->eval(q`
+    print test::useshared::test() . "#" ;
+    print test::required::test() . "#" ;
+  `);
+    
+  my ( $stdout1 , $stderr1 ) ;
+  
+  my $world = Safe::World->new(
+  stdout => \$stdout1 ,
+  stderr => \$stderr1 ,
+  flush  => 1 ,
+  ) ;
+  
+  $world->link_world($world_cache) ;
+  
+  $world->eval(q`
+    print test::useshared::test() . "#" ;
+    print test::required::test() . "#" ;
+    print "$INC{'test/useshared.pm'}|$INC{'test/required.pm'}" ;
+  `);
+    
+  ok($stdout0 , 'useshared_ok#required_ok#') ;
+  ok($stderr0 , '') ;
+  
+  ok($stdout1 , 'useshared_ok#required_ok##shared#|#shared#') ;
+  ok($stderr1 , '') ;
 
 }
 #########################

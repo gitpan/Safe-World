@@ -25,11 +25,15 @@ $VERSION = '0.02' ;
   
   *Safe_World_NOW = \$Safe::World::NOW ;
 
-###########
-# HEADERS #
-###########
+#########
+# DUMMY #
+#########
 
 sub headers {}
+sub stdout_data {}
+sub buffer_data {}
+
+sub flush {}
 
 #########
 # PRINT #
@@ -71,12 +75,6 @@ sub close_headers {
   $this->{HEADER_CLOSED} = 1 ;
   return 1 ;
 }
-
-#########
-# FLUSH #
-#########
-
-sub flush {}
 
 #############
 # TIEHANDLE #

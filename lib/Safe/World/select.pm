@@ -35,9 +35,9 @@ $VERSION = '0.02' ;
 #######
 
 sub new {
-  return undef if $_[1]->{DESTROIED} ;
 
-  #my @call = caller ; print "SELECT NEW>> $_[1] [$Safe_World_NOW] @call\n" ;
+##  my @call = caller(4) ; print main::STDOUT "SELECT NEW>> $_[1] [$Safe_World_NOW][$Safe_World_NOW->{SELECT}] @call\n" ;
+  return undef if $_[1]->{DESTROIED} ;
   
   my $eval_err = $@ ;
 
@@ -91,7 +91,7 @@ sub new {
 sub DESTROY {
   my $this = shift ;
   
-  ##print "SELECT DESTROY>> $this\n" ;  
+  ##print main::STDOUT "SELECT DESTROY>> $this\n" ;  
   
   my $eval_err = $@ ;
   
