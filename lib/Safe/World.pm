@@ -15,7 +15,7 @@ package Safe::World ;
 use strict qw(vars);
 
 use vars qw($VERSION @ISA) ;
-$VERSION = '0.12' ;
+$VERSION = '0.13' ;
 
 require overload ;
 

@@ -1,6 +1,10 @@
 Revision history for Perl extension Safe::World.
 
 
+0.13  9 Apr 2004
+      - Fixed PREREQ_PM, adding Hash::NoRef to it.
+
+
 0.12  9 Apr 2004
       - Added wrapper for caller() to handle rigth the package names.
 
