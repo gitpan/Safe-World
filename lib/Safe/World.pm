@@ -12,22 +12,37 @@
 
 package Safe::World ;
 
+use strict qw(vars);
+
+use vars qw($VERSION @ISA) ;
+$VERSION = '0.12' ;
+
+require overload ;
+
+no warnings ;
+
 ########
 # VARS #
 ########
 
   use vars qw($NOW $EVALX) ;
 
-  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC , %WORLDS_LINKS , $IGNORE_EXIT , $SELECT_STDOUT_FIX , $UNIVERSAL_ISA) ;
+  my ($COMPARTMENT_X , $SAFE_WORLD_SELECTED_STATIC , %WORLDS_LINKS , $IGNORE_EXIT , $SELECT_STDOUT_FIX , $UNIVERSAL_ISA , $TRACK_GLOB_X) ;
   
   my $COMPARTMENT_NAME = 'SAFEWORLD' ;
   my $COMPARTMENT_NAME_CACHE = 'SAFEWORLD_CACHE_' ;
+  
+  my $TRACK_GLOBS_BASE = 'Safe::World::GLOBS::' ;
   
   my @DENY_OPS = qw(chroot syscall exit dump fork lock threadsv) ;
   
   my @TRACK_VARS_DEF = qw(*_ @INC %INC %ENV) ;
 
   my $MAIN_STASH = *{'main::'}{HASH} ;
+  
+  my $BLESS_TABLE = { POOL => Hash::NoRef->new() } ;
+  my $SAFEWORLDS_TABLE = { POOL => Hash::NoRef->new() } ;
+
   
   ########
   # KEYS #
@@ -159,6 +174,8 @@ sub UNIVERSAL_ISA {
   my $outside = ($MAIN_STASH == *{"main::"}{HASH}) ? 1 : undef ;
   my $root = ref $NOW ? $NOW->{ROOT} : undef ;
   
+  if ( $class eq 'UNIVERSAL' && is_SvBlessed($ref) ) { return 1 ;}
+  
   if ( !$outside ) {
     my $class1 = "$root\::$class" ;
     my ($class2) = ( ref($ref) =~ /^(?:(?:main|(SAFEWORLD(?:_CACHE_)?\d+))::)*.*$/s );
@@ -170,13 +187,105 @@ sub UNIVERSAL_ISA {
   }
 }
 
+##########
+# CALLER #
+##########
+
+sub CALLER {
+  my @ret ;
+  if ( @_ ) { @ret = CORE::caller($_[0]+1) ;}
+  else { @ret = (CORE::caller(1))[0..2] ;}
+  
+  my $outside = ($MAIN_STASH == *{"main::"}{HASH}) ? 1 : undef ;
+  
+  if ( !$outside ) {
+    if ( $ret[0] =~ /^(?:main|(?:SAFEWORLD(?:_CACHE_)?\d+))(::.*|)$/ ) {
+      $ret[0] = "main$1" ;
+    }
+  }
+  
+  return @ret if wantarray ;
+  return $ret[0] ;
+}
+
+#########
+# BLESS #
+#########
+
+sub BLESS {
+  my $ref ;
+  if ( $#_ == 0 ) {
+    my $class = CORE::caller ;
+    $ref = bless($_[0],$class) ;
+  }
+  else { $ref = bless($_[0] , $_[1]) ;}
+
+  my $outside = ($MAIN_STASH == *{"main::"}{HASH}) ? 1 : undef ;
+
+  if (
+       !$outside 
+       && ref($ref) !~ /^(?:(?:main|(?:SAFEWORLD(?:_CACHE_)?\d+))::)?Safe::World(?:::(?:Compartment|select).*)?$/
+       && (
+            $] >= 5.007
+            || (
+                 #!ref($ref)->can('()')
+                 #&&
+                 ref($ref) !~ /^(?:(?:main|(?:SAFEWORLD(?:_CACHE_)?\d+))::)?(?:Object::MultiType.*|XML::Smart)$/
+               )
+           )
+     ) {
+    my $id = ++$BLESS_TABLE->{id} ;
+    my ($base) = ( *{"main::"}{HASH}{'main::'} =~ /^\W*(?:main::)*(\w+)/ ) ;
+    $BLESS_TABLE->{POOL}{$id} = $ref ;
+    $BLESS_TABLE->{$base}{$id} = undef ;
+    ##print STDOUT "BLESS>> [". ref($ref) ."] # $id\n" ;
+  }
+
+  return $ref ;
+}
+
+sub _rebless {
+  my ( $pack , $new_pack ) = @_ ;
+  #print STDOUT "REBLESS>>@_\n" ;
+
+  foreach my $ids_i ( keys %{$BLESS_TABLE->{$pack}} ) {
+    my $obj = $BLESS_TABLE->{POOL}{$ids_i} ;
+    my $ref = ref($obj) ;
+    ##print STDOUT "REBLESS>> $obj # $ref # $ids_i <$pack , $new_pack >\n" ;
+    if ( $ref &&
+         $ref ne 'SCALAR' &&
+         $ref ne 'ARRAY' &&
+         $ref ne 'HASH' &&
+         $ref ne 'CODE' &&
+         $ref ne 'GLOB' &&
+         $ref ne 'FORMAT' &&
+         $ref ne 'REF' &&
+         $ref ne 'UNKNOW' &&
+         $ref !~ /^(?:main|(?:SAFEWORLD(?:_CACHE_)?\d+)::)?Safe::World(?:[\w:]*)$/
+    ) {
+      if ( $ref =~ /^(?:main|(?:SAFEWORLD(?:_CACHE_)?\d+))(?:::(.*)|)$/ ) { $ref = $1 || 'main' ;}
+      CORE::bless($obj , "$new_pack\::$ref") ;
+    }
+    else {
+      delete $BLESS_TABLE->{POOL}{$ids_i} ;
+      delete $BLESS_TABLE->{$pack}{$ids_i} ;
+    }
+  }
+
+  return ;
+}
+
 #########
 # BEGIN #
 #########
 
+use Opcode ; ## Need to load Opcode before redefine caller!
+
 sub BEGIN {
   *CORE::GLOBAL::exit = \&EXIT ;
   *CORE::GLOBAL::select = \&SELECT ; ## Fix different behavior of STDOUT select() inside Safe compartments on Perl-5.6x and Perl-5.8x.
+  *CORE::GLOBAL::caller = \&CALLER ;
+  *CORE::GLOBAL::bless = \&BLESS ;
   $UNIVERSAL_ISA = \&UNIVERSAL::isa ;
   *UNIVERSAL::isa = \&UNIVERSAL_ISA ;
 }
@@ -185,6 +294,7 @@ sub BEGIN {
 # REQUIRES #
 ############
 
+use Hash::NoRef ;
 use Safe::World::Compartment ;
 use Safe::World::ScanPack ;
 
@@ -193,23 +303,20 @@ use Safe::World::stdout ;
 use Safe::World::stdoutsimple ;
 use Safe::World::stderr ;
 
-use strict qw(vars);
-
-use vars qw($VERSION @ISA) ;
-$VERSION = '0.11' ;
-
 ##########
 # SCOPES #
 ##########
 
   use Safe::World::Scope ;
 
-  my $SCOPE_Safe_World_stdout = new Safe::World::Scope('Safe::World::stdout') ;
-  my $SCOPE_Safe_World_Compartment = new Safe::World::Scope('Safe::World::Compartment') ;
-  my $SCOPE_Safe_World_select = new Safe::World::Scope('Safe::World::select') ;
-  my $SCOPE_Safe_World_ScanPack = new Safe::World::Scope('Safe::World::ScanPack') ;
+  my $SCOPE_Safe_World_stdout = new Safe::World::Scope('Safe::World::stdout',undef,1) ;
+  my $SCOPE_Safe_World_Compartment = new Safe::World::Scope('Safe::World::Compartment',undef,1) ;
+  my $SCOPE_Safe_World_select = new Safe::World::Scope('Safe::World::select',undef,1) ;
+  my $SCOPE_Safe_World_ScanPack = new Safe::World::Scope('Safe::World::ScanPack',undef,1) ;
   
   my $Safe_World_stdout_headsplitter_html = \&Safe::World::stdout::headsplitter_html ;
+  
+  *is_SvBlessed = \&Hash::NoRef::is_SvBlessed ;
 
 #########
 # ALIAS #
@@ -354,11 +461,21 @@ sub new {
     
   $this->link_pack('UNIVERSAL') ;
   $this->link_pack('attributes') ;
-  $this->link_pack('DynaLoader') ;
+  $this->link_pack('DynaLoader') ;  
 #  $this->link_pack('IO') ;
   
 #  $this->link_pack('Exporter') ;
 #  $this->link_pack('warnings') ;
+  
+#  $this->link_pack('AutoLoader') ;
+#  $this->link_pack('Carp') ;
+#  $this->link_pack('Config') ;
+#  $this->link_pack('Errno') ;
+#  $this->link_pack('overload') ;
+#  $this->link_pack('re') ;  
+#  $this->link_pack('subs') ;  
+#  $this->link_pack('vars') ;    
+
   $this->link_pack('CORE') ;  
   
   $this->link_pack('<none>') ;  
@@ -393,6 +510,8 @@ sub new {
   $this->track_vars(qw(>STDOUT >STDERR <STDIN)) if $this->{NO_IO} ;
   
   $this->unselect_static ;
+  
+  $SAFEWORLDS_TABLE->{POOL}{ $this->{ROOT} } = $this ;
 
   return $this ;
 }
@@ -613,7 +732,7 @@ sub eval {
 
   if ( $MAIN_STASH != *{"main::"}{HASH} ) {
   ##if ( $_[0]->{INSIDE} ) {
-    #print "EVAL>> INSIDE [[ $_[1] ]]\n" ;
+    ##print STDOUT "EVAL>> INSIDE [[ $_[1] ]]\n" ;
     ++$EVALX ;
     
     if ( wantarray ) {
@@ -628,7 +747,8 @@ sub eval {
     }
   }
   else {
-    #print "EVAL>> OUT $_[1]\n" ;
+    ##print STDOUT "EVAL>> OUT >> ". \@{'_'} ."\n" ;
+    
     my $SAFE_WORLD_selected ;
     if ( $NOW != $_[0] ) {
       $SAFE_WORLD_selected = $SCOPE_Safe_World_select->NEW($_[0]) ; ##Safe::World::select->new($_[0]) ;
@@ -637,13 +757,13 @@ sub eval {
     $NOW->{INSIDE} = 1 ;
     
     if ( wantarray ) {
-      my @ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;    
+      my @ret = $NOW->{SAFE}->reval($_[1]) ;    
       $NOW->warn($@ , 1) if $@ ;
       $NOW->{INSIDE} = 0 ;
       return @ret ;
     }
     else {
-      my $ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;
+      my $ret = $NOW->{SAFE}->reval($_[1]) ;
       $NOW->warn($@ , 1) if $@ ;
       $NOW->{INSIDE} = 0 ;
       return $ret ;
@@ -701,13 +821,13 @@ sub eval_no_warn {
     $NOW->{INSIDE} = 1 ;
     
     if ( wantarray ) {
-      my @ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;    
+      my @ret = $NOW->{SAFE}->reval($_[1]) ;    
       $NOW->{INSIDE} = 0 ;
       $SIG{__WARN__} = $__SAVE_SIGS__{warn} ; $SIG{__DIE__} = $__SAVE_SIGS__{die} ; $IGNORE_EXIT = undef ; $NOW->{TIESTDERR}->unblock if $NOW->{TIESTDERR} ;
       return @ret ;
     }
     else {
-      my $ret = $NOW->{SAFE}->reval("\@_ = () ; $_[1]") ;
+      my $ret = $NOW->{SAFE}->reval($_[1]) ;
       $NOW->{INSIDE} = 0 ;
       $SIG{__WARN__} = $__SAVE_SIGS__{warn} ; $SIG{__DIE__} = $__SAVE_SIGS__{die} ; $IGNORE_EXIT = undef ; $NOW->{TIESTDERR}->unblock if $NOW->{TIESTDERR} ;
       return $ret ;
@@ -1048,6 +1168,8 @@ sub track_vars {
     my $set_defaults ;
     foreach my $var ( @vars ) {
       if ( $var =~ /^:def\w*$/ ) { $set_defaults = 1 ; next ;}
+      
+      ##print STDOUT ">> $var\n" ;
     
       my ($t , $n) = ( $var =~ /^(\W)(.*)/s ) ;
       $this->{TRACK_VARS}{$root}{$n}{g} = \*{$root.'::'.$n} if !$this->{TRACK_VARS}{$root}{$n}{g} ;
@@ -1061,13 +1183,12 @@ sub track_vars {
         $this->{TRACK_VARS}{$root}{$n}{$t} = \@{$root.'::'.$n} if $t eq '@' ;
         $this->{TRACK_VARS}{$root}{$n}{$t} = \%{$root.'::'.$n} if $t eq '%' ;
       }
-      #elsif ( $t eq '*' ) {
-      #  my $glob = ++$this->{TRACK_VARS}{x} ;
-      #  $glob = "Safe::World::GLOBS::$this->{ROOT}::G$glob" ;
-      #  *{$glob} = \*{$root.'::'.$n} ;
-      #  my $table = *{"$root\::"}{HASH} ;
-      #  $this->{TRACK_VARS}{$root}{$n}{$t} = [\*{$glob} , $table] ;
-      #}
+      elsif ( $t eq '*' ) {
+        my $glob = 'G' . ++$TRACK_GLOB_X ;
+        push( @{$this->{TRACK_GLOBS}} , $glob) ;
+        *{$TRACK_GLOBS_BASE . $glob} = \*{$root.'::'.$n} ;
+        $this->{TRACK_VARS}{$root}{$n}{$t} = \*{$TRACK_GLOBS_BASE . $glob} ;
+      }
       else {
         $this->{TRACK_VARS}{$root}{$n}{$t} = 1 ;
       }
@@ -1096,38 +1217,50 @@ sub set_tracked_vars {
 
   $pack_root ||= $this->{ROOT} ;
   
-  ## print main::STDOUT "====================== $this->{ROOT}\n" ;
+  ##print main::STDOUT "====================== $this->{ROOT} >> $pack_root\n" ;
   
   foreach my $track_root ( keys %$track_vars ) {
+    
+    if (
+      $this->{TRACK_ONLY_LINKED}{$track_root}
+      &&
+      (
+        ( $this->{TRACK_ONLY_LINKED}{$track_root} eq '1' && !$this->{LINKED_WORLDS}{$track_root} )
+        ||
+        ( $this->{TRACK_ONLY_LINKED}{$track_root} ne '1' && !$this->{LINKED_WORLDS}{ $this->{TRACK_ONLY_LINKED}{$track_root} } )
+      )
+    ) { next ;}
   
     if ($track_root ne $pack_root) {
       *{"$pack_root\::$track_root\::"} = \*{"$pack_root\::"} ;
-      ##print STDOUT "PACKLNK>> $pack_root\::$track_root\:: >> $pack_root\::\n" ;
+      ##print main::STDOUT "LINK>> $pack_root\::$track_root >> $pack_root\n" ;
+      _rebless($track_root , $pack_root) ;
     }
   
     foreach my $n ( keys %{ $$track_vars{$track_root} } ) {
       my $glob = $$track_vars{$track_root}{$n}{g} ;
       
-      ##print main::STDOUT "TRACK>> $track_root\::$n >> $pack_root\::$n >> $]\n" ;
-            
-      if ( $$track_vars{$track_root}{$n}{'>'} ) {
+      ##print main::STDOUT "TRACK>> $track_root\::$n >> $pack_root\::$n \n" ;
+      
+      if ( $$track_vars{$track_root}{$n}{'*'} ) {
+        *$glob = \*{$pack_root.'::'.$n} ;
+      }
+      elsif ( $$track_vars{$track_root}{$n}{'>'} ) {
         if ($] < 5.007) {
           untie *{"$track_root\::$n"} ;
-          tie(*{"$track_root\::$n"} => 'Safe::World::stdoutsimple' , $track_root , \*{"$pack_root\::$n"} ) ;
+          tie( *$glob => 'Safe::World::stdoutsimple' , $track_root , \*{"$pack_root\::$n"} ) ;
         }
         else {
-          *{"$track_root\::$n"} = \*{"$pack_root\::$n"} ;
+          *$glob = \*{"$pack_root\::$n"} ;
         }
       }
-      
-      if ( $$track_vars{$track_root}{$n}{'<'} ) {
-        *{"$track_root\::$n"} = \*{"$pack_root\::$n"} ;
+      elsif ( $$track_vars{$track_root}{$n}{'<'} ) {
+        *$glob = \*{"$pack_root\::$n"} ;
       }
 
       *$glob = \${$pack_root.'::'.$n} if $$track_vars{$track_root}{$n}{'$'} ;
       *$glob = \@{$pack_root.'::'.$n} if $$track_vars{$track_root}{$n}{'@'} ;
       *$glob = \%{$pack_root.'::'.$n} if $$track_vars{$track_root}{$n}{'%'} ;
-      *$glob = \*{$pack_root.'::'.$n} if $$track_vars{$track_root}{$n}{'*'} ;
     }
   }
 
@@ -1145,23 +1278,37 @@ sub clean_tracked_vars {
   local(*NULL) ;
   
   foreach my $track_root ( keys %{ $this->{TRACK_VARS} } ) {
+  
+    if (
+      $this->{TRACK_ONLY_LINKED}{$track_root}
+      &&
+      (
+        ( $this->{TRACK_ONLY_LINKED}{$track_root} eq '1' && !$this->{LINKED_WORLDS}{$track_root} )
+        ||
+        ( $this->{TRACK_ONLY_LINKED}{$track_root} ne '1' && !$this->{LINKED_WORLDS}{ $this->{TRACK_ONLY_LINKED}{$track_root} } )
+      )
+    ) { next ;}
+  
     foreach my $n ( keys %{ $this->{TRACK_VARS}{$track_root} } ) {
       my $glob = $this->{TRACK_VARS}{$track_root}{$n}{g} ;
       
-      if ( $this->{TRACK_VARS}{$track_root}{$n}{'>'} ) {
+      my $ref ;
+            
+      if ( $ref = $this->{TRACK_VARS}{$track_root}{$n}{'*'} ) {
+        *$glob = \*$ref ;
+      }
+      elsif ( $this->{TRACK_VARS}{$track_root}{$n}{'>'} ) {
         if ( tied *{"$track_root\::$n"} ) {
-          untie(*{"$track_root\::$n"}) ;
+          untie( *$glob ) ;
         }
         else {
-          *{"$track_root\::$n"} = \*NULL ;
+          *$glob = \*NULL ;
         }
       }
-      
-      if ( $this->{TRACK_VARS}{$track_root}{$n}{'<'} ) {
-        *{"$track_root\::$n"} = \*NULL ;
+      elsif ( $this->{TRACK_VARS}{$track_root}{$n}{'<'} ) {
+        *$glob = \*NULL ;
       }
       
-      my $ref ;
       if ( $ref = $this->{TRACK_VARS}{$track_root}{$n}{'$'} ) {
         *$glob = $ref eq '1' ? \$NULL : $ref ;
       }
@@ -1171,6 +1318,7 @@ sub clean_tracked_vars {
       if ( $ref = $this->{TRACK_VARS}{$track_root}{$n}{'%'} ) {
         *$glob = $ref eq '1' ? \%NULL : $ref ;
       }
+
     }
     
     if ( $this->{TRACK_DEPENDENCIES}{$track_root} || $track_root =~ /CACHE/ ) {
@@ -1179,6 +1327,32 @@ sub clean_tracked_vars {
       if ( !defined *{$base}{HASH}{$leaf} ) {
         delete $this->{TRACK_VARS}{$root} ;
         delete $this->{TRACK_VARS}{$track_root} ;
+        delete $this->{TRACK_DEPENDENCIES}{$track_root} ;
+      }
+    }
+
+  }
+  
+  return 1 ;
+}
+
+######################
+# CHECK_TRACK_DEPEND #
+######################
+
+sub check_track_depend {
+  my $this = shift ;
+  return if !$this->{TRACK_VARS} ;
+  
+  foreach my $track_root ( keys %{ $this->{TRACK_VARS} } ) {
+
+    if ( $this->{TRACK_DEPENDENCIES}{$track_root} || $track_root =~ /CACHE/ ) {
+      my $root = $this->{TRACK_DEPENDENCIES}{$track_root} || $track_root ;
+      my ($base , $leaf) = ( "main::$root\::" =~ /^(.*::)(\w+::)$/ ) ;
+      if ( !defined *{$base}{HASH}{$leaf} ) {
+        delete $this->{TRACK_VARS}{$root} ;
+        delete $this->{TRACK_VARS}{$track_root} ;
+        delete $this->{TRACK_DEPENDENCIES}{$track_root} ;
       }
     }
 
@@ -1421,6 +1595,8 @@ sub link_world {
   my $world_root = $world->{ROOT} ;
   my $root = $this->{ROOT} ;
   
+  $world->track_vars(':defaults') if !$dont_touch_main && !$world->{TRACK_VARS_DEF} ;
+  
   ########
   
   my @shared_pack = @{$world->{SHAREDPACK}} ;
@@ -1476,6 +1652,9 @@ sub link_world {
   }
   
   ########
+  
+  $this->{LINKED_WORLDS}{ $world->{ROOT} } = 1 ;
+  $world->{LINKED_WORLDS}{ $this->{ROOT} } = 1 ;  
   
   $world->set_tracked_vars($this) if !$dont_touch_main ;
   
@@ -1537,6 +1716,9 @@ sub unlink_world {
   ########
   
   $world->clean_tracked_vars if !$dont_touch_main ;
+  
+  delete $this->{LINKED_WORLDS}{ $world->{ROOT} } ;
+  delete $world->{LINKED_WORLDS}{ $this->{ROOT} } ;
   
   if ( !$dont_touch_main && $track_this ) {
     $world->track_vars( $this , ':defaults' ) ;
@@ -1744,6 +1926,8 @@ sub redirect_stdout {
   
   my ( $ref ) = @_ ;
   return if ref($ref) ne 'SCALAR' ;
+  
+  push( @{ $this->{TIESTDOUT}->{REDIRECT_STACK} } , $this->{TIESTDOUT}->{REDIRECT} ) if $this->{TIESTDOUT}->{REDIRECT} ;
   $this->{TIESTDOUT}->{REDIRECT} = $ref ;
 }
 
@@ -1755,7 +1939,7 @@ sub restore_stdout {
   my $this = shift ;
   return if $this->{NO_IO} ;
   
-  $this->{TIESTDOUT}->{REDIRECT} = undef ;
+  $this->{TIESTDOUT}->{REDIRECT} = @{ $this->{TIESTDOUT}->{REDIRECT_STACK} } ? pop( @{ $this->{TIESTDOUT}->{REDIRECT_STACK} } ) : undef ;
 }
 
 #########
@@ -1828,6 +2012,25 @@ sub close {
   return 1 ;
 }
 
+sub _root_is_tracked {
+  my ( @roots ) = @_ ;
+
+  foreach my $world_root ( keys %{ $SAFEWORLDS_TABLE->{POOL} } ) {
+    my $world = $SAFEWORLDS_TABLE->{POOL}{$world_root} ;
+    if ( !$world ) {
+      delete $SAFEWORLDS_TABLE->{POOL}{$world_root} ;
+      next ;
+    }
+    
+    foreach my $track_root ( %{ $world->{TRACK_VARS} } ) {
+      foreach my $roots_i ( $world_root , @roots ) {
+        return 1 if $track_root eq $roots_i ;
+      }
+    } 
+  }  
+  return undef ;
+}
+
 ###########
 # DESTROY #
 ###########
@@ -1845,6 +2048,24 @@ sub DESTROY {
   untie *{"$this->{ROOT}\::STDERR"} ;
   
   $this->clean_tracked_vars ;
+  
+  if ( ref($this->{TRACK_GLOBS}) eq 'ARRAY' ) {
+    local(*NULL) ;
+    my $glob ;
+    foreach my $glob_i ( @{$this->{TRACK_GLOBS}} ) {
+      $glob = $TRACK_GLOBS_BASE . $glob_i ;
+      *{$glob} = \*NULL ;
+      undef *{$glob} ;
+      delete *{$TRACK_GLOBS_BASE}{HASH}{$glob_i} ;
+      #print "GLOBS>> $TRACK_GLOBS_BASE\::$glob_i\n" ;
+    }
+  }
+  if ( $BLESS_TABLE->{$this->{ROOT}} && !_root_is_tracked( $this->{ROOT} ) ) {
+    ##print "DEST>> $this->{ROOT}\n" ;
+    foreach my $ids_i ( keys %{ $BLESS_TABLE->{$this->{ROOT}} } ) {
+      delete $BLESS_TABLE->{POOL}{$ids_i} ;
+    }
+  }
   
   $this->unshare_vars ;
   
@@ -1924,13 +2145,13 @@ sub undef_pack {
   my $this = shift ;
   my ( $packname , $donot_clean ) = @_ ;
 
-  #print main::STDOUT "UNDEFPACK>> $packname ". (scalar *{'main::'}{HASH}) ."\n" ;
+  ##print main::STDOUT "UNDEFPACK>> $packname\n" ;
   
-  $packname .= '::' unless $packname =~ /::$/ ;
+  $packname .= '::' ;
   no strict "refs" ;
   my $package = *{$packname}{HASH} ;
   return unless defined $package ;
-
+  
   local(*NULL) ;
   my $tmp_sub = sub{} ;
   
@@ -1948,7 +2169,7 @@ sub undef_pack {
   foreach my $symb ( keys %$package ) {
     $fullname = "$packname$symb" ;
     if ( $symb !~ /::$/ && $symb !~ /[^\w:]/ && $symb !~ /^[1-9\.]/ && (!$donot_clean || !$donot_clean->{$symb}) ) {
-      ##print main::STDOUT "undef>> $packname>> $symb >> $fullname\n" ;
+      ##print main::STDOUT "undef>> $packname >> $symb\n" ;
       
       eval {
         if (defined &$fullname) {
@@ -1993,6 +2214,30 @@ sub undef_pack {
   $SIG{__DIE__} = $prev_sigdie ;
 
   return 1 ;
+}
+
+sub END {
+
+  if (0)  {
+    foreach my $Key ( sort {$a <=> $b} keys %{ $BLESS_TABLE->{POOL} } ) {
+      my $Value = $BLESS_TABLE->{POOL}{$Key} ;
+      next if !$Value ;
+      my $package = *{ ref($Value) . '::' }{HASH} ;
+      my $defin = %$package ? 1 : 0 ;
+      print ">>> [$defin] $Key = $Value\n" ;
+      
+      foreach my $base ( sort keys %$BLESS_TABLE ) {
+        next if $base eq 'POOL' ;
+        print "    $base\n" if exists $BLESS_TABLE->{$base}{$Key} ;
+      }
+      
+    }
+  }
+  
+  %{ $BLESS_TABLE->{POOL} } = () ;
+  $BLESS_TABLE = undef ;
+  %{ $SAFEWORLDS_TABLE->{POOL} } = () ;
+  $SAFEWORLDS_TABLE = undef ;
 }
 
 #######

@@ -14,6 +14,8 @@ package Safe::World::Compartment ;
 
 use strict qw(vars) ;
 
+no warnings ;
+
 ##########
 # SCOPES #
 ##########
@@ -33,7 +35,7 @@ sub reval {
   return Opcode::_safe_call_sv(
     $_[0]->{Root},
     $_[0]->{Mask},
-    eval("package ". $_[0]->{Root} ."; sub {\@_=(); my \$EVALX = $Safe_World_EVALX; eval \$__EVALCODE__; }")
+    eval("package ". $_[0]->{Root} ."; sub { \@_=(); my \$EVALX = $Safe_World_EVALX; eval \$__EVALCODE__; }")
   );
 }
 
@@ -116,6 +118,8 @@ sub share_from {
   
   return undef unless keys %{"$pkg\::"} ;
 
+  my $REF ;
+
   my $arg;
   foreach $arg (@$vars) {
     next unless( $arg =~ /^[\$\@%*&]?\w[\w:]*$/ || $arg =~ /^\$\W\w?$/ ) ;
@@ -131,6 +135,8 @@ sub share_from {
               \%{$pkg."::$var"} : ($type eq '*') ?
                 \*{$pkg."::$var"} : undef ;
   }
+
+  return 1 ;
 }
 
 ######################################

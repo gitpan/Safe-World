@@ -17,6 +17,8 @@ use strict qw(vars);
 use vars qw($VERSION @ISA) ;
 $VERSION = '0.02' ;
 
+no warnings ;
+
 ##########
 # SCOPES #
 ##########
@@ -126,6 +128,8 @@ sub STORE {
   }
   $this->{STDOUT} = $stdout ;
 }
+
+sub FETCH {}
 
 sub DESTROY {}
 

@@ -17,6 +17,8 @@ use strict qw(vars);
 use vars qw($VERSION @ISA) ;
 $VERSION = '0.03' ;
 
+no warnings ;
+
 my ($HOLE , %HOOK_IDS , %SCOPES_CACHE , %TABLES) ;
 
 #######
@@ -82,11 +84,13 @@ sub new_hook {
         my ($tp , $sub , $name) = ($1,"$2$3",$3) ;
         next if $name eq '__SAFEWORLD_HOOK__' ;
         
-        if    ( $tp eq '$' )  { $table->{$tp}{$name} = \$$sub ;}
+
+        if ( $tp eq '&' )  { $table->{$tp}{$name} = \&$sub ;}
+        elsif ( $only_call ) { ; }
+        elsif ( $tp eq '$' )  { $table->{$tp}{$name} = \$$sub ;}
         elsif ( $tp eq '@' )  { $table->{$tp}{$name} = \@$sub ;}
         elsif ( $tp eq '%' )  { $table->{$tp}{$name} = \%$sub ;}
         elsif ( $tp eq '*' )  { $table->{$tp}{$name} = \&$sub ;}
-        elsif ( $tp eq '&' )  { $table->{$tp}{$name} = \&$sub ;}      
       }
     }
     
@@ -271,6 +275,8 @@ sub set {
   
   $this->{HOOK}->__SAFEWORLD_HOOK__('set',$tp,$var,$ref) ;
 }
+
+sub DESTROY {}
 
 #######
 # END #

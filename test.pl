@@ -9,6 +9,9 @@ use Safe::World ;
 
 use strict ;
 use warnings qw'all' ;
+
+$|=1;
+
 #########################
 {
 
@@ -224,7 +227,7 @@ use warnings qw'all' ;
   ) ;
   
   $| = 0 ;
-  
+
   use Safe::World::Scope ;
 
   my $SCOPE_Safe_World ;
@@ -290,7 +293,7 @@ use warnings qw'all' ;
 
     print Data::Dumper::Dumper( \@inc ) ;
   `);
-  
+    
   $world->close ;
 
   $world = undef ;
@@ -1131,7 +1134,46 @@ package main ;
   ok($stderr1 , '') ;
 
 }
+
+if (0) {
 #########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+  
+  my $outvar ;
+  
+  $world->eval_args(q` $refout = $_[0] ;` , \$outvar ) ;
+  
+  $world->eval(q` print "REF: ". ref($refout) ; `) ;
+  
+  $world->eval(q` $$refout = 123 ;`) ;
+  
+  ok($outvar , 123) ;
+  
+  $world->eval(q`
+    require test::endblk ;
+  `) ;
+  
+  $world->close ;
+  
+  $world = undef ;
+  
+  ok($outvar , 'END BLOCK EXECUTED!') ;
+  
+  ok($stdout , 'REF: SCALAR') ;
+  ok($stderr , '') ;
+  
+
+}
+#########################
+}
 
 print "\nThe End! By!\n" ;
 

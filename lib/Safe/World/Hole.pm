@@ -17,6 +17,8 @@ $VERSION = '0.09';
 
 @ISA = qw(Safe::Hole) ;
 
+no warnings ;
+
 ###########
 # REQUIRE #
 ###########
@@ -69,6 +71,8 @@ sub call_09_fix {
   die $@ unless $did_not_die ;
   return $wantarray ? @r : $r[0] ;
 }
+
+sub DESTROY {}
 
 #######
 # END #

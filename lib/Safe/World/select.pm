@@ -17,13 +17,15 @@ use strict qw(vars);
 use vars qw($VERSION @ISA) ;
 $VERSION = '0.02' ;
 
+no warnings ;
+
 ##########
 # SCOPES #
 ##########
 
   use Safe::World::Scope ;
   
-  my $SCOPE_Safe_World = new Safe::World::Scope('Safe::World') ;
+  my $SCOPE_Safe_World = new Safe::World::Scope('Safe::World',undef,1) ;
 
   use vars qw($Safe_World_NOW $Safe_World_EVALX) ;
   
@@ -160,7 +162,7 @@ sub out_set {
   elsif ($var_tp eq '@') { @{'main::'.$name} = @{$val} ;}
   elsif ($var_tp eq '%') { %{'main::'.$name} = %{$val} ;}
   elsif ($var_tp eq '*') { *{'main::'.$name} = $val ;}
-  else  { ++$Safe_World_EVALX ; eval("$var = \$val ;") ;}
+  else  { ++$Safe_World_EVALX ; eval("$var = \$val ;") ;}  
 }
 
 ################

@@ -17,6 +17,8 @@ use vars qw($VERSION *ENTRY);
 
 $VERSION = '0.01';
 
+no warnings ;
+
 #######
 # NEW #
 #######
