@@ -80,12 +80,12 @@ __END__
 
 =head1 NAME
 
-Front end interface to Safe::Hole/0.08 , Safe::Hole/0.09 and Safe::Hole/0.10+
+Safe::World::Hole - Front end interface to Safe::Hole/0.08 , Safe::Hole/0.09 and Safe::Hole/0.10+
 
 =head1 NOTE
 
 This module is here just to handle and fix Safe::Hole/0.09.
-Other versions of Safe::Hole wil work fine.
+Other versions of Safe::Hole will work fine.
 
 B<Do not use this directly. See L<Safe::Hole>.>
 

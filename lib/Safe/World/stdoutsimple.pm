@@ -51,7 +51,7 @@ sub print_stdout {
   
   if ( ref($stdout) eq 'SCALAR' ) { $$stdout .= $_[0] ;}
   elsif ( ref($stdout) eq 'CODE' ) {
-    my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+    my $sel = $Safe_World_NOW->{SELECT}{PREVSTDOUT} ? &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) : undef ;
     &$stdout($Safe_World_NOW , $_[0]) ;
     &Safe::World::SELECT($sel) if $sel ;
   }
@@ -116,6 +116,16 @@ sub WRITE {}
 sub FILENO {}
 
 sub CLOSE {}
+
+sub STORE {
+  my $this = shift ;
+  my $stdout = shift ;
+  if ( !ref($stdout) ) {
+    $stdout =~ s/^\*// ;
+    $stdout = \*{$stdout} ;
+  }
+  $this->{STDOUT} = $stdout ;
+}
 
 sub DESTROY {}
 

@@ -109,6 +109,16 @@ sub FILENO {}
 
 sub CLOSE {}
 
+sub STORE {
+  my $this = shift ;
+  my $stdout = shift ;
+  if ( !ref($stdout) ) {
+    $stdout =~ s/^\*// ;
+    $stdout = \*{$stdout} ;
+  }
+  $this->{STDOUT} = $stdout ;
+}
+
 sub DESTROY {}
 
 #######

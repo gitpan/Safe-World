@@ -68,7 +68,7 @@ sub new {
     }
   }
   
-  if ( $this->{WORLD}->{TIESTDOUT}->{AUTO_FLUSH} ) { $| = 1 ;}
+  if ( $this->{WORLD}->{TIESTDOUT} && $this->{WORLD}->{TIESTDOUT}->{AUTO_FLUSH} ) { $| = 1 ;}
 
   $this->{WORLD}->set('$SAFEWORLD', $this->{WORLD} , 1 ) if !$this->{WORLD}->{NO_SET_SAFEWORLD} ;
 
@@ -176,7 +176,7 @@ sub print_stderr {
 ##############
 
 sub handle_die {
-  my $core_exit = 1 if $_[0] =~ /#CORE::GLOBAL::exit#/ ;
+  my $core_exit = ($_[0] =~ /#CORE::GLOBAL::exit#/) ? 1 : undef ;
 
   $Safe_World_NOW->{EXIT} = 1 if $core_exit ;
   $Safe_World_NOW->print_stderr(@_) if !$core_exit ;

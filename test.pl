@@ -3,13 +3,195 @@
 ###use Data::Dumper ; print Dumper( $world ) ;
 
 use Test;
-BEGIN { plan tests => 73 } ;
+BEGIN { plan tests => 89 } ;
 
 use Safe::World ;
 
 use strict ;
 use warnings qw'all' ;
+#########################
+{
 
+  my $tmp ;
+  my $world_cache = Safe::World->new(
+  is_cache  => 1 ,
+  stdout    => \$tmp ,
+  stderr    => \$tmp ,
+  no_io     => 1 ,
+  flush     => 1 ,
+  sharepack => ['foo'] ,
+  ) ;
+  
+  $world_cache->eval(q`
+  $GLOBAL = 'cache' ;
+  package foo ;
+    sub test { print STDOUT "TEST>> @_ [ $main::GLOBAL ]" ; }
+  `) ;
+  
+  my $val0 = $world_cache->eval(q`$GLOBAL`) ;
+    
+  ###########
+  
+  my ( $stdout , $stderr ) ;
+  my $world = Safe::World->new(
+  stdout       => \$stdout ,
+  stderr       => \$stderr ,
+  flush        => 1 ,  
+  ) ;
+  
+  $world->link_world($world_cache) ;
+
+  $world->eval(q`
+    $GLOBAL = 'world1' ;
+    foo::test(123) ;
+  `) ;
+  
+  my $world_val = $world->eval(q`$GLOBAL`) ;
+  
+  $world->unlink_world($world_cache) ;
+    
+  $world->close ;
+  $world = undef ;
+  
+  my $val = $world_cache->eval(q`$GLOBAL`) ;
+  
+  ok($val0 , 'cache') ;
+  ok($world_val , 'world1') ;
+  ok($val , 'cache') ;
+
+  ok($stdout , 'TEST>> 123 [ world1 ]') ;
+  ok($stderr , '') ;
+  ok($tmp , undef) ;
+
+}
+#########################
+{
+
+  my $tmp ;
+  my $world_cache = Safe::World->new(
+  is_cache  => 1 ,
+  stdout    => \$tmp ,
+  stderr    => \$tmp ,
+  no_io     => 1 ,
+  flush     => 1 ,
+  sharepack => ['foo'] ,
+  ) ;
+  
+  $world_cache->eval(q`
+  package bar ;
+    $GLOBAL = 'cache' ;
+  package foo ;
+    sub test { print STDOUT "TEST>> @_ [ $bar::GLOBAL ]" ; }
+  `) ;
+  
+  $world_cache->track_vars( qw($bar::GLOBAL) ) ;
+  
+  my $val0 = $world_cache->eval(q`$bar::GLOBAL`) ;
+    
+  ###########
+  
+  my ( $stdout , $stderr ) ;
+  my $world = Safe::World->new(
+  stdout       => \$stdout ,
+  stderr       => \$stderr ,
+  flush        => 1 ,  
+  ) ;
+  
+  $world->link_world($world_cache) ;
+  
+  $world->eval(q`
+    $bar::GLOBAL = 'world1' ;
+    foo::test(123) ;
+  `) ;
+  
+  my $world_val = $world->eval(q`$bar::GLOBAL`) ;
+  
+  $world->unlink_world($world_cache) ;
+    
+  $world->close ;
+  $world = undef ;
+  
+  my $val = $world_cache->eval(q`$bar::GLOBAL`) ;
+  
+  ok($val0 , 'cache') ;
+  ok($world_val , 'world1') ;
+  ok($val , 'cache') ;
+
+  ok($stdout , 'TEST>> 123 [ world1 ]') ;
+  ok($stderr , '') ;
+  ok($tmp , undef) ;
+
+}
+#########################
+{
+
+  my $tmp ;
+  my $world_cache = Safe::World->new(
+  is_cache  => 1 ,
+  stdout    => \$tmp ,
+  stderr    => \$tmp ,
+  no_io     => 1 ,
+  flush     => 1 ,
+  sharepack => ['foo'] ,
+  ) ;
+  
+  ###########
+  
+  my ( $stdout , $stderr ) ;
+  my $world = Safe::World->new(
+  stdout       => \$stdout ,
+  stderr       => \$stderr ,
+  flush        => 1 ,  
+  ) ;
+  
+  $world->link_world($world_cache) ;
+  
+  $world_cache->track_vars( $world , qw($GLOBAL :defaults) ) ;
+  
+  $world->eval(q`
+  package foo ;
+    sub test { print "TEST>> @_ [ $main::GLOBAL ]" ; }
+  `) ;
+  
+  $world->eval(q`
+    $GLOBAL = 'world1' ;
+    foo::test(123) ;
+  `) ;
+  
+  $world->unlink_world($world_cache) ;
+    
+  $world->close ;
+  $world = undef ;
+  
+  ###########
+  
+  my ( $stdout2 , $stderr2 ) = () ;
+  $world = Safe::World->new(
+  stdout       => \$stdout2 ,
+  stderr       => \$stderr2 ,
+  flush        => 1 ,  
+  ) ;
+  
+  $world->link_world($world_cache) ;
+  
+  $world->eval(q`
+    $GLOBAL = 'world2' ;
+    foo::test(456) ;
+  `) ;
+  
+  $world->unlink_world($world_cache) ;
+  
+  $world->close ;
+  $world = undef ;
+  
+  ###########
+  
+  ok($stdout , 'TEST>> 123 [ world1 ]') ;
+  ok($stderr , '') ;
+  ok($stdout2 , 'TEST>> 456 [ world2 ]') ;
+  ok($stderr2 , '') ;
+
+}
 #########################
 {
 
@@ -174,7 +356,7 @@ Content-type: text/html
 
   $world = undef ;
   
-  $stdout =~ s/SAFEWORLD3::STDOUT/main::STDOUT/gs ;
+  $stdout =~ s/SAFEWORLD\d+::STDOUT/main::STDOUT/gs ;
   
   ok($stdout , q`[[X-Powered-By: Safe::World
 Content-type: text/html
@@ -513,7 +695,7 @@ content2 main::STDOUT
   
   my $lnk = $world1->link_world($world0) ;
   ok($lnk,1) ;
-  ok($world0->{WORLD_SHARED}, $world1->{ROOT}) ;
+  ok($world0->{WORLD_SHARED}[0], $world1->{ROOT}) ;
   
   $world1->eval(q`
     my @incs = sort keys %INC ;
@@ -535,7 +717,7 @@ content2 main::STDOUT
   
   $lnk = $world2->link_world($world0) ;
   ok($lnk,1) ;
-  ok($world0->{WORLD_SHARED}, $world2->{ROOT}) ;
+  ok($world0->{WORLD_SHARED}[0], $world2->{ROOT}) ;
   
   $world2->eval(q`
     my @incs = sort keys %INC ;

@@ -60,30 +60,42 @@ sub headsplitter_html {
   my $headsplitter ;
     
   if ( $_[0] =~ /Content-Type:\s*\S+(.*?)(\015?\012\015?\012|\r?\n\r?\n)/si ) {
-    if ($1 !~ /<.*?>/s) { $headsplitter = $2 ;}
+    if ($1 !~ /<[^>]+>/s) { $headsplitter = $2 ;}
   }
   
   ## Try to fix wrong headers:
 
-  elsif ( $_[0] =~ /^(.*?)(?:\015?\012|\r?\n)(<.*?>)(?:\015?\012|\r?\n)/s ) {
-    if ($1 !~ /<.*?>/s) { $headsplitter = $2 ;}
+  if ( !$headsplitter && $_[0] =~ /^(.*?)(?:\015?\012|\r?\n)([ \t]*<[^>]+>[ \t]*)(?:\015?\012|\r?\n)/s ) {
+    if ($1 !~ /<[^>]+>/s) { $headsplitter = $2 ;}
   }
   
-  elsif ( $_[0] =~ /^(.*?)(<html\s*>\s*<.*?>)/si ) {
-    if ($1 !~ /<.*?>/s) { $headsplitter = $2 ;}
+  if ( !$headsplitter && $_[0] =~ /^(.*?)(<html\s*>\s*<[^>]+>)/si ) {
+    if ($1 !~ /<[^>]+>/s) { $headsplitter = $2 ;}
   }
   
-  elsif ( $_[0] =~ /^(.*?)(<.*?>\s*<.*?>)/s ) {
-    if ($1 !~ /<.*?>/s) { $headsplitter = $2 ;}
+  if ( !$headsplitter && $_[0] =~ /^(.*?)(<[^>]+>\s*<[^>]+>)/s ) {
+    my ($s1 , $s2) = ($1,$2) ; 
+    if ($s1 !~ /<[^>]+>/s && $s1 !~ /(?:^|[\r\n\015\012])[^\s:]+:[^\r\n\015\012]+$/s) {
+      my ($line) = ( $s1 =~ /([^\r\n\015\012]+)$/s );
+      $headsplitter = $line . $s2 ;
+    }
   }
   
-  elsif ( $_[0] =~ /(\015?\012\015?\012|\r?\n\r?\n)/s ) { $headsplitter = $1 ;}
+  if ( !$headsplitter && $_[0] =~ /^(.*?)(\015?\012\015?\012|\r?\n\r?\n)/s ) {
+    if ($1 !~ /<[^>]+>/s) { $headsplitter = $2 ;}
+  }
   
-  elsif ( $_[0] =~ /(?:\015?\012|\r?\n)([ \t]*<.*?>\s)/s ) { $headsplitter = $1 ;}
+  my $is_all_content ;
+  if ( !$headsplitter && $_[0] =~ /^(?:<[^>]+>|>)+(?:\015?\012|\r?\n)/s ) { $headsplitter = $is_all_content = 1 ;}  
+  
+  if ( !$headsplitter && $_[0] =~ /(?:\015?\012|\r?\n)([ \t]*(?:<[^>]+>|>)+\s)/s ) { $headsplitter = $1 ;}
   
   my ($headers , $end) ;
   
-  if ( $headsplitter ne '' && $_[0] =~ /^(.*?)\Q$headsplitter\E(.*)/s ) {
+  if ( $is_all_content ) {
+    $end = $_[0] ;
+  }
+  elsif ( $headsplitter ne '' && $_[0] =~ /^(.*?)\Q$headsplitter\E(.*)/s ) {
     $headers = $1 ;
     $end     = $2 ;
     
@@ -165,7 +177,7 @@ sub print_stdout {
   
     if ( ref($stdout) eq 'SCALAR' ) { $$stdout .= $_[0] ;}
     elsif ( ref($stdout) eq 'CODE' ) {
-      my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+      my $sel = $Safe_World_NOW->{SELECT}{PREVSTDOUT} ? &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) : undef ;
       &$stdout($Safe_World_NOW , $_[0]) ;
       &Safe::World::SELECT($sel) if $sel ;
     }
@@ -199,7 +211,7 @@ sub print_headout {
 
   if ( ref($headout) eq 'SCALAR' ) { $$headout .= $_[0] ;}
   elsif ( ref($headout) eq 'CODE' ) {
-    my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+    my $sel = $Safe_World_NOW->{SELECT}{PREVSTDOUT} ? &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) : undef ;
     &$headout($Safe_World_NOW , $_[0]) ;
     &Safe::World::SELECT($sel) if $sel ;
   }
@@ -252,7 +264,7 @@ sub call_oncloseheaders {
   
   return if !$this->{ONCLOSEHEADERS} ;
   
-  my $sel = &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) if $Safe_World_NOW->{SELECT}{PREVSTDOUT} ;
+  my $sel = $Safe_World_NOW->{SELECT}{PREVSTDOUT} ? &Safe::World::SELECT( $Safe_World_NOW->{SELECT}{PREVSTDOUT} ) : undef ;
 
   my $autoflush = $this->{AUTO_FLUSH} ;
   
@@ -363,6 +375,16 @@ sub CLOSE {
   $this->{AUTO_FLUSH} = 1 ;
   $this->close_headers ;
   $this->flush ;
+}
+
+sub STORE {
+  my $this = shift ;
+  my $stdout = shift ;
+  if ( !ref($stdout) ) {
+    $stdout =~ s/^\*// ;
+    $stdout = \*{$stdout} ;
+  }
+  $this->{STDOUT} = $stdout ;
 }
 
 sub DESTROY {
