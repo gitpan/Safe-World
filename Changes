@@ -1,0 +1,6 @@
+Revision history for Perl extension Safe::World.
+
+0.01  Sat Nov 29 19:19:42 2003
+	- original version; created by h2xs 1.21 with options
+		-X -n Safe::World
+

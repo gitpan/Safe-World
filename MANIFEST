@@ -1,0 +1,12 @@
+Changes
+MANIFEST
+Makefile.PL
+README
+test.pl
+test/shared.pm
+lib/Safe/World.pm
+lib/Safe/World/ScanPack.pm
+lib/Safe/World/select.pm
+lib/Safe/World/stderr.pm
+lib/Safe/World/stdout.pm
+lib/Safe/World/stdoutsimple.pm
