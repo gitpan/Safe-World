@@ -17,7 +17,7 @@ use strict qw(vars);
 ######### *** Don't declare any lexicals above this point ***
 
 sub reval {
-  my $__ExPr__ = $_[1] ;
+  my $__EVALCODE__ = $_[1] ;
   no strict ;
 
   $Safe::World::EVALX += 2 ;
@@ -25,7 +25,7 @@ sub reval {
   return Opcode::_safe_call_sv(
     $_[0]->{Root},
     $_[0]->{Mask},
-    eval("package ". $_[0]->{Root} ."; sub {\@_=(); my \$EVALX = $Safe::World::EVALX; eval \$__ExPr__; }")
+    eval("package ". $_[0]->{Root} ."; sub {\@_=(); my \$EVALX = $Safe::World::EVALX; eval \$__EVALCODE__; }")
   );
 }
 

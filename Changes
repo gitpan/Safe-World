@@ -1,5 +1,16 @@
 Revision history for Perl extension Safe::World.
 
+0.04  30 Nov 2003
+      - New test with IO::Socket to test select() inside the compartment.
+        (Due old problems in other works with Safe and mod_perl, just to ensure that it's ok in Safe::World).
+      - Fixed warnings for constant redefinition on Perl-5.8.x when cleanning the compartment.
+      - Added method redirect_stdout() and restore_stdout().
+      - Fixed bug for internal call of die(). Now die() doesn't exit from the World, only from it's own eval().
+        What enables other eval() calls to the World.
+      - Fixed bug with ignored warnings, like syntax error.
+      - Added method eval_args() and eval_pack_args().
+
+
 0.03  30 Nov 2003
       - No more dependence of Safe. Own implementation of Safe at Safe::World::Compartment,
         with simpler code and less sub call and variables criations for reval().

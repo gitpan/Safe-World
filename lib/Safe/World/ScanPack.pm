@@ -85,7 +85,7 @@ sub _scan {
 # PACKAGES #
 ############
 
-sub packages { return @{ @_[0]->{PACKAGES} } ;}
+sub packages { return @{ $_[0]->{PACKAGES} } ;}
 
 #######
 # END #

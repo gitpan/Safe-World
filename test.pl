@@ -3,12 +3,12 @@
 ###use Data::Dumper ; print Dumper( $world ) ;
 
 use Test;
-BEGIN { plan tests => 33 } ;
+BEGIN { plan tests => 47 } ;
 
 use Safe::World ;
 
 use strict ;
-use warnings ;
+use warnings qw'all' ;
 
 #########################
 {
@@ -418,7 +418,194 @@ end!
   $stderr =~ s/eval \d+/eval x/gi ;
 
   ok($stderr , "error!\nwarning!!! at (eval x) line 19.\n") ;
-  exit;
+}
+#########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  ) ;
+  
+  ok(1);
+  
+  print "## Socket test at www.perl.com: to test bug at select() with IO::Socket.\n" ;
+  
+  $world->eval(q`
+  
+    use IO::Socket ;
+
+    my $host = 'www.perl.com' ;
+
+    my $sel = select ;
+    
+    print "SEL: $sel\n" ;
+
+    my $sock = new IO::Socket::INET(
+       PeerAddr => $host,
+       PeerPort => 80,
+       Proto    => 'tcp',
+       Timeout  => 30) ;
+
+    if ($sock) {
+      $sock->autoflush(1) ;
+      my $rn = "\015\012" ;
+    
+      print $sock "GET / HTTP/1.0$rn" ;
+      print $sock "Host: $host$rn" ;
+      print $sock "$rn$rn" ;
+      
+      my $data ;
+      1 while( read($sock, $data , 1024*4, length($data) ) ) ;
+      
+      print "DATA: " ;
+      if ( $data =~ /<html>.*?<\/html>/si ) { print "ok\n" ;}
+      else { print "error\n" ;}
+    }
+    else { print "SOCKET ERROR!\n" ;}
+
+    close($sock) ;
+  `);
+  
+  $world->close ;
+  
+  if ( $stdout =~ /SOCKET ERROR/s ) {
+    print "## ** Socket test skiped! Can't connect to www.perl.com!\n" ;
+  }
+  else {
+    my $root = $world->root ;
+    print " "; ok( $stdout =~ /SEL: (?:main|$root)::STDOUT/s ) ;
+    print " "; ok( $stdout =~ /DATA: ok/s ) ;
+    print "## End of Socket tests.\n" ;    
+  }
+
+  ## Can't have warnings for constant sub redefinition! Bug at Perl-5.8.x
+  ok($stderr , '') ;
+}
+#########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+  
+  $world->eval(q`
+    sub test { print "sub_test[@_]" ; }
+  
+    print "A|" ;
+    
+    my $out ;
+    $SAFEWORLD->redirect_stdout(\$out) ;
+    test(123);
+    $SAFEWORLD->restore_stdout ;
+    
+    print "B|" ;
+    print "OUT: <$out>" ;
+  `);
+
+  ok($stdout , 'A|B|OUT: <sub_test[123]>') ;
+  ok($stderr , '') ;
+}
+#########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+
+  $world->eval(q`
+    &null ;
+  `);
+  
+  $world->eval(q`
+    sub test { print "sub_test[@_]" ; }
+    print "A|" ;
+    &test ;
+    print "B|" ;
+  `);
+  
+  ok($stdout , 'A|sub_test[]B|') ;
+  ok($stderr =~ /Undefined subroutine &(?:main|SAFEWORLD\d+)::null/) ;
+
+}
+#########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+  
+  $world->eval(q`
+    print "A|" ;
+    exit ;
+    print "B|" ;
+  `);
+  
+  $world->eval(q`
+    print "C|" ;
+  `);
+
+  ok($stdout , 'A|') ;
+  ok($stderr =~ /Can't evaluate after exit!/) ;
+
+}
+#########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+  
+  $world->eval(q`
+    print "A|" ;
+    die ;
+    print "B|" ;
+  `);
+  
+  $world->eval(q`
+    print "C|" ;
+  `);
+  
+  ok($stdout , 'A|C|') ;
+  ok($stderr =~ /Died at \(eval \d+\)/) ;
+
+}
+#########################
+{
+
+  my ( $stdout , $stderr ) ;
+
+  my $world = Safe::World->new(
+  stdout => \$stdout ,
+  stderr => \$stderr ,
+  flush  => 1 ,
+  ) ;
+  
+  $world->eval(q` print "a> @_|" ; `);
+  
+  $world->eval_args(q` print "b> @_|" ;` , 123 , 456);
+  
+  ok($stdout , 'a> |b> 123 456|') ;
+  ok($stderr , '') ;
+
 }
 #########################
 

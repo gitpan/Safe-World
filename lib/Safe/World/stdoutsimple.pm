@@ -89,7 +89,14 @@ sub TIEHANDLE {
 
 sub PRINT {
   my $this = shift ;
-  $this->print_stdout( join("", (@_[0..$#_])) ) ;
+  
+  if ( $this->{REDIRECT} ) {
+    ${$this->{REDIRECT}} .= join("", (@_[0..$#_])) ;
+  }
+  else {
+    $this->print_stdout( join("", (@_[0..$#_])) ) ;
+  }
+
   return 1 ;
 }
 

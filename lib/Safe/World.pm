@@ -23,7 +23,7 @@ use Safe::World::stderr ;
 use strict qw(vars);
 
 our ($VERSION , @ISA) ;
-$VERSION = '0.03' ;
+$VERSION = '0.04' ;
 
 ########
 # VARS #
@@ -262,7 +262,9 @@ sub new {
 ##############
 
 sub sync_evalx {
+  my $tmp = $@ ;
   eval("=1") ;
+  $@ = $tmp ;
   my ($evalx) = ( $@ =~ /\(eval (\d+)/s );
   $Safe::World::EVALX = $evalx ;
 }
@@ -342,7 +344,7 @@ sub reset {
 
 sub select_static {
   if ( !$SAFE_WORLD_SELECTED_STATIC && $NOW != $_[0] ) {
-    $SAFE_WORLD_SELECTED_STATIC = Safe::World::select->new(@_[0]) ;
+    $SAFE_WORLD_SELECTED_STATIC = Safe::World::select->new($_[0]) ;
     return 1 ;
   }
   return ;
@@ -376,12 +378,22 @@ sub eval {
 
   ##print "[[$_[1]]]\n" ;
   if ( $_[0]->{INSIDE} ) {
-    #print "EVAL>> INSIDE\n" ;
+    ##print "EVAL>> INSIDE $_[1]\n" ;
     ++$Safe::World::EVALX ;
-    return eval("no strict;\@_ = () ; package main ; $_[1]") ;
+    
+    if ( wantarray ) {
+      my @__HPL_ReT__ = eval("no strict;\@_ = () ; package main ; $_[1]") ;
+      $_[0]->warn($@ , 1) if $@ ;
+      return @__HPL_ReT__ ;
+    }
+    else {
+      my $__HPL_ReT__ = eval("no strict;\@_ = () ; package main ; $_[1]") ;
+      $_[0]->warn($@ , 1) if $@ ;
+      return $__HPL_ReT__ ;
+    }
   }
   else {
-    #print "EVAL>> OUT $Safe::World::NOW [$_]\n" ;
+    #print "EVAL>> OUT $_[1]\n" ;
     my $SAFE_WORLD_selected ;
     if ( $NOW != $_[0] ) { $SAFE_WORLD_selected = Safe::World::select->new($_[0]) ;}
     
@@ -389,11 +401,13 @@ sub eval {
     
     if ( wantarray ) {
       my @ret = $_[0]->{SAFE}->reval("\@_ = () ; $_[1]") ;    
+      $_[0]->warn($@ , 1) if $@ ;
       $NOW->{INSIDE} = 0 ;
       return @ret ;
     }
     else {
-      my $ret = $_[0]->{SAFE}->reval("\@_ = () ; $_[1]") ;    
+      my $ret = $_[0]->{SAFE}->reval("\@_ = () ; $_[1]") ;
+      $_[0]->warn($@ , 1) if $@ ;
       $NOW->{INSIDE} = 0 ;
       return $ret ;
     }
@@ -405,6 +419,46 @@ sub eval {
 #############
 
 sub eval_pack { $_[0]->eval("package $_[1] ; $_[2]") ;}
+
+#############
+# EVAL_ARGS #
+#############
+
+sub eval_args {
+  my $this = shift ;
+  my $code = shift ;
+
+  my $tmp = $_ ;
+  $_ = \@_ ;
+  
+  if ( wantarray ) {
+    my @ret = $this->eval("\@_=\@{\$_}; $code") ;
+    $_ = $tmp ;
+    return @ret ;
+  }
+  else {
+    my $ret = $this->eval("\@_=\@{\$_}; $code") ;
+    $_ = $tmp ;
+    return $ret ;
+  }
+}
+
+##################
+# EVAL_PACK_ARGS #
+##################
+
+sub eval_pack_args {
+  my $this = shift ;
+  my $pack = shift ;
+  my $code = shift ;
+
+  if ( @_ ) {
+    return $this->eval_args("package $pack ; $code" , @_) ;
+  }
+  else {
+    return $this->eval("package $pack ; $code") ;
+  }
+}
 
 ########
 # CALL #
@@ -840,6 +894,40 @@ sub scanpack_table {
   return( @table ) ;
 }
 
+########
+# WARN #
+########
+
+sub warn {
+  my $this = shift ;
+  
+  return if ($this->{TIESTDERR}->{LAST_ERROR} eq $_[0] || $_[0] =~ /#CORE::GLOBAL::exit#/ ) ;
+  
+  my @call = caller($_[1]) ;
+  
+  my %keys = (
+  package  => 0 ,
+  file     => 1 ,
+  line     => 2 ,
+  sub      => 3 ,
+  evaltext => 6 ,
+  ) ;
+  
+  my $caller ;
+  
+  foreach my $Key (sort { $keys{$a} <=> $keys{$b} } keys %keys ) {
+    my $val = $call[$keys{$Key}] ;
+    next if $val eq '' ;
+    my $s = '.' x (7 - length($Key)) ;
+    $val = "\"$val\"" if $val =~/\s/s ;
+    $caller .= "  $Key$s: $val\n" ;
+  }
+  
+  #my $caller = qq`package="$call[0]" ; file="$call[1]" ; line="$call[2]" ; sub="$call[3]" ; evaltext="$call[6]"`;
+  
+  $this->print_stderr("$_[0] CALLER(\n$caller)\n") ;
+}
+
 #########
 # PRINT #
 #########
@@ -872,37 +960,6 @@ sub print_stderr {
   $this->{TIESTDERR}->print(@_) ;
 }
 
-########
-# WARN #
-########
-
-sub warn {
-  my $this = shift ;
-  my @call = caller($_[1]) ;
-  
-  my %keys = (
-  package  => 0 ,
-  file     => 1 ,
-  line     => 2 ,
-  sub      => 3 ,
-  evaltext => 6 ,
-  ) ;
-  
-  my $caller ;
-  
-  foreach my $Key (sort { $keys{$a} <=> $keys{$b} } keys %keys ) {
-    my $val = $call[$keys{$Key}] ;
-    next if $val eq '' ;
-    my $s = '.' x (7 - length($Key)) ;
-    $val = "\"$val\"" if $val =~/\s/s ;
-    $caller .= "  $Key$s: $val\n" ;
-  }
-  
-  #my $caller = qq`package="$call[0]" ; file="$call[1]" ; line="$call[2]" ; sub="$call[3]" ; evaltext="$call[6]"`;
-  
-  $this->print_stderr("$_[0] CALLER(\n$caller)\n") ;
-}
-
 ################
 # PRINT_HEADER #
 ################
@@ -914,6 +971,26 @@ sub print_header {
   if ( $NOW != $this ) { $SAFE_WORLD_selected = Safe::World::select->new($this) ;}
   
   $this->{TIESTDOUT}->print_headout(@_) ;
+}
+
+###################
+# REDIRECT_STDOUT #
+###################
+
+sub redirect_stdout {
+  my $this = shift ;
+  my ( $ref ) = @_ ;
+  return if ref($ref) ne 'SCALAR' ;
+  $this->{TIESTDOUT}->{REDIRECT} = $ref ;
+}
+
+##################
+# RESTORE_STDOUT #
+##################
+
+sub restore_stdout {
+  my $this = shift ;
+  $this->{TIESTDOUT}->{REDIRECT} = undef ;
 }
 
 #########
@@ -1075,6 +1152,10 @@ sub undef_pack {
   no warnings ;
   local $^W = 0 ;
   
+  ## 'no warning' still have some warns on Perl-5.8.x
+  my $prev_sigwarn = $SIG{__WARN__} ;
+  $SIG{__WARN__} = sub{} ;
+                  
   my ($fullname) ;
   foreach my $symb ( keys %$package ) {
     $fullname = "$packname$symb" ;
@@ -1106,6 +1187,10 @@ sub undef_pack {
 
   undef %{*{$packname}{HASH}} ;
   undef *{$packname} ;
+  
+  $SIG{__WARN__} = $prev_sigwarn ;
+
+  return 1 ;
 }
 
 #######
@@ -1395,6 +1480,16 @@ Same as:
   my $code = "print time ;" ;
   $world->eval("package foo ; $code") ;
 
+=head2 eval_args (CODE , ARGS)
+
+Evaluate code sending args (defining internal @_):
+
+  $world->eval_args(' print "$_[0]\n" ' , qw(a b c) ); ## Should print 'a'.
+
+=head2 eval_pack_args (PACKAGE , CODE , ARGS)
+
+Same as eval_args(), but setting the package name to run the code.
+
 =head2 flush (bool)
 
 Set $| to 1 or 0 if I<bool> is defined.
@@ -1471,6 +1566,35 @@ Print some data to the STDERR of the world.
 Same as I<print>.
 
 Print some data to the STDOUT of the world.
+
+=head2 redirect_stdout (SCALAR)
+
+Redirect the STDOUT to a scalar.
+Soo, you can internally redirect a peace of the output to a scalar.
+
+In this example I want to catch what the sub I<test()> prints:
+
+    sub test { print "sub_test[@_]" ; }
+    
+    print "A\n" ;
+    
+    my $out ;
+    $SAFEWORLD->redirect_stdout(\$out) ;
+    
+      test(123);
+    
+    $SAFEWORLD->restore_stdout ;
+    
+    print "B\n" ;
+    print "OUT: <$out>" ;
+
+** See I<restore_stdout()>.
+
+=head2 restore_stdout().
+
+Restore the STDOUT output if a I<redirect_stdout()> was made before.
+
+** See I<redirect_stdout()>.
 
 =head2 reset
 

@@ -248,7 +248,10 @@ sub TIEHANDLE {
 sub PRINT {
   my $this = shift ;
   
-  if ( !$| && !$this->{AUTO_FLUSH} && !$this->{AUTOHEAD} ) { $this->{BUFFER} .= join("", (@_[0..$#_])) ;}
+  if ( $this->{REDIRECT} ) {
+    ${$this->{REDIRECT}} .= join("", (@_[0..$#_])) ;
+  }
+  elsif ( !$| && !$this->{AUTO_FLUSH} && !$this->{AUTOHEAD} ) { $this->{BUFFER} .= join("", (@_[0..$#_])) ;}
   else {
     $this->flush if $this->{BUFFER} ne '' ;
     $this->print_stdout( join("", (@_[0..$#_])) ) ;

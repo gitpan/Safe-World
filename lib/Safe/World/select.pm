@@ -25,6 +25,8 @@ sub new {
   return undef if $_[1]->{DESTROIED} ;
 
   #my @call = caller ; print "SELECT NEW>> $_[1] [$Safe::World::NOW] @call\n" ;
+  
+  my $eval_err = $@ ;
 
   my $this = bless({} , __PACKAGE__) ;
   
@@ -34,7 +36,7 @@ sub new {
   $this->{WORLD}->{SELECT}  = {} if !$this->{WORLD}->{SELECT} ;
   $this->{WORLD}->{SHARING} = {} if !$this->{WORLD}->{SHARING} ;
   
-  my $prevstdout = select( \*{"$this->{WORLD}->{ROOT}\::STDOUT"} ) ;
+  my $prevstdout = select( \*{"$this->{WORLD}->{ROOT}\::main::STDOUT"} ) ;
   $this->{WORLD}->{SELECT}{PREVSTDOUT} = $this->{PREVSTDOUT} = \*{$prevstdout} ;
   
   $this->{WORLD}->{SELECT}{PREVSTDERR} = $this->{PREVSTDERR} = *main::STDERR{IO} ;
@@ -63,6 +65,8 @@ sub new {
   }
   
   Safe::World::sync_evalx() ;
+  
+  $@ = $eval_err ;
 
   return $this ;
 }
@@ -75,6 +79,8 @@ sub DESTROY {
   my $this = shift ;
   
   ##print "SELECT DESTROY>> $this\n" ;  
+  
+  my $eval_err = $@ ;
   
   %{$this->{WORLD}->{SELECT}} = () ;
   
@@ -102,6 +108,8 @@ sub DESTROY {
   $Safe::World::NOW = (ref($this->{PREVWORLD}) eq 'Safe::World') ? $this->{PREVWORLD} : undef ;
   
   Safe::World::sync_evalx() ;
+  
+  $@ = $eval_err ;
   
   return ;
 }
@@ -146,16 +154,25 @@ sub out_set {
 # PRINT_STDERR #
 ################
 
-sub print_stderr { $Safe::World::NOW->print_stderr(@_) ;  return ;}
+sub print_stderr {
+#  print main::STDOUT "warn>> @_ <<[$@]\n" ;
+  $Safe::World::NOW->print_stderr(@_) ;  return ;
+}
 
 ##############
 # HANDLE_DIE #
 ##############
 
 sub handle_die {
-  $Safe::World::NOW->{EXIT} = 1 ;
-  $Safe::World::NOW->print_stderr(@_) if $_[0] !~ /#CORE::GLOBAL::exit#/ ;
-  $Safe::World::NOW->close ;
+  my $core_exit = 1 if $_[0] =~ /#CORE::GLOBAL::exit#/ ;
+  my $exit = 1 if $core_exit ;
+
+  $Safe::World::NOW->{EXIT} = 1 if $exit ;
+  $Safe::World::NOW->print_stderr(@_) if !$core_exit ;
+  $Safe::World::NOW->close if $exit ;
+  
+  $@ = undef if $core_exit ;
+  
   return ;
 }
 

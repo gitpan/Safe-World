@@ -31,6 +31,8 @@ sub print_stderr {
   my $this = shift ;
   my $stderr = $this->{STDERR} ;
   
+  $this->{LAST_ERROR} = $_[0] ;
+  
   if ( ref($stderr) eq 'SCALAR' ) { $$stderr .= $_[0] ;}
   elsif ( ref($stderr) eq 'CODE' ) {
     my $sel = select( $Safe::World::NOW->{SELECT}{PREVSTDOUT} ) if $Safe::World::NOW->{SELECT}{PREVSTDOUT} ;
